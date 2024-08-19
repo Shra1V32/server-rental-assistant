@@ -10,6 +10,12 @@ Server Plan Bot is a Telegram bot designed to manage user accounts on a server. 
 - **List Users**: List all users along with their plan expiry dates.
 - **Notify Expiry**: Periodically notify users of their plan expiry.
 
+# To Do
+- Implement checking for authorized telegram users
+- Link user id with telegram id
+- Notify user of expiry tagging them with their telegram id
+- Implement a way to notify user of expiry before it happens
+
 ## Prerequisites
 
 - Python 3.7+
