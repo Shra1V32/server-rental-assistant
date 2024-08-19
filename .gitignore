@@ -1,0 +1,11 @@
+# Ignore telethon's session files
+*.session
+
+# Ignore .env file
+.env
+
+# Ignore .vscode folder
+.vscode
+
+# Ignore database file
+server_plan.db
