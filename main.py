@@ -12,11 +12,13 @@ from dotenv import load_dotenv
 from telethon import TelegramClient, events
 
 from constants import (
+    ADJECTIVES,
     ADMIN_ID,
     API_HASH,
     API_ID,
     BE_NOTED_TEXT,
     BOT_TOKEN,
+    NOUNS,
     SSH_HOSTNAME,
     SSH_PORT,
     TIME_ZONE,
@@ -56,31 +58,9 @@ def get_day_suffix(day):
 
 # Function to generate a secure, memorable password
 def generate_password():
-    adjectives = [
-        "crazy",
-        "sunny",
-        "happy",
-        "wild",
-        "quick",
-        "witty",
-        "jolly",
-        "zany",
-        "lazy",
-    ]
-    nouns = [
-        "cat",
-        "evening",
-        "river",
-        "breeze",
-        "mountain",
-        "ocean",
-        "sun",
-        "moon",
-        "tree",
-    ]
     password = (
-        random.choice(adjectives)
-        + random.choice(nouns)
+        random.choice(ADJECTIVES)
+        + random.choice(NOUNS)
         + "".join(random.choices(string.digits, k=4))
     )
     return password
