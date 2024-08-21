@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 
 import pytz
 from dotenv import load_dotenv
-from telethon import TelegramClient, events
+from telethon import Button, TelegramClient, events
 
 from constants import (
     ADJECTIVES,
@@ -305,15 +305,44 @@ async def notify_expiry():
                     f"⚠️ Plan for user `{username}` has expired. Please take necessary action.",
                     buttons=[
                         [
-                            ("Delete User", f"/delete_user {username}"),
-                        ]
+                            Button.inline(
+                                "Delete user", data=f"delete_user {username}"
+                            ),
+                            Button.inline("Cancel", data=f"cancel {username}"),
+                        ],
                     ],
                 )
             # subprocess.run(['sudo', 'userdel', '-r', username], check=True)
             # cursor.execute('DELETE FROM users WHERE username=?', (username,))
             # conn.commit()
 
-        await asyncio.sleep(60)
+        await asyncio.sleep(60)  # Check every minute
+
+
+# Handle button presses
+@client.on(events.CallbackQuery())
+async def handle_button(event):
+    if event.data == b"cancel":
+        username = event.data.decode().split()[1]
+        prev_msg = (
+            f"⚠️ Plan for user `{username}` has expired. Please take necessary action."
+        )
+
+        await event.edit(prev_msg + "\n\n" + "🚫 Action canceled.")
+    elif event.data.startswith(b"delete_user"):
+        username = event.data.decode().split()[1]
+        prev_msg = (
+            f"⚠️ Plan for user `{username}` has expired. Please take necessary action."
+        )
+        await client.send_message(ADMIN_ID, f"🗑️ Deleting user `{username}`...")
+        subprocess.run(["sudo", "pkill", "-u", username], check=False)
+        subprocess.run(["sudo", "userdel", "-r", username], check=True)
+        cursor.execute("DELETE FROM users WHERE username=?", (username,))
+        conn.commit()
+        await event.edit(prev_msg + "\n\n" + f"✅ User `{username}` deleted.")
+
+    else:
+        await event.edit("❌ Invalid action.")
 
 
 # Start the bot and the periodic task
