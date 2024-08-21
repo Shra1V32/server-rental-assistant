@@ -179,9 +179,12 @@ async def delete_user(event):
         # remove all the running processes for the user
         subprocess.run(["sudo", "pkill", "-u", username], check=False)
 
-        # delete the user from the system
-        subprocess.run(["sudo", "userdel", "-r", username], check=True)
-
+        try:
+            # delete the user from the system
+            subprocess.run(["sudo", "userdel", "-r", username], check=True)
+        except subprocess.CalledProcessError as e:
+            await event.respond(f"❌ Error deleting user `{username}`: {e}")
+            return
         cursor.execute("DELETE FROM users WHERE username=?", (username,))
         conn.commit()
 
@@ -336,7 +339,13 @@ async def handle_button(event):
         )
         await client.send_message(ADMIN_ID, f"🗑️ Deleting user `{username}`...")
         subprocess.run(["sudo", "pkill", "-u", username], check=False)
-        subprocess.run(["sudo", "userdel", "-r", username], check=True)
+        try:
+            subprocess.run(["sudo", "userdel", "-r", username], check=True)
+        except subprocess.CalledProcessError as e:
+            await event.edit(
+                prev_msg + "\n\n" + f"❌ Error deleting user `{username}`: {e}"
+            )
+            return
         cursor.execute("DELETE FROM users WHERE username=?", (username,))
         conn.commit()
         await event.edit(prev_msg + "\n\n" + f"✅ User `{username}` deleted.")
