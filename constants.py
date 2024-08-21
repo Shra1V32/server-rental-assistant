@@ -25,6 +25,12 @@ ADJECTIVES = [
     "jolly",
     "zany",
     "lazy",
+    "sleepy",
+    "dopey",
+    "grumpy",
+    "bashful",
+    "sneezy",
+    "curly",
 ]
 NOUNS = [
     "cat",
@@ -36,4 +42,12 @@ NOUNS = [
     "sun",
     "moon",
     "tree",
+    "flower",
+    "star",
+    "space",
+    "forest",
+    "meadow",
+    "rain",
+    "snow",
+    "wind",
 ]
