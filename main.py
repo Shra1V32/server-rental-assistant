@@ -278,9 +278,9 @@ async def notify_expiry():
         )
         expired_users = cursor.fetchall()
 
-        for user_id, username in expired_users:
+        for _, username in expired_users:
             await client.send_message(
-                user_id,
+                ADMIN_ID,
                 f"⏰ Your plan has expired, `{username}`! Please renew soon. 😊",
             )
             # subprocess.run(['sudo', 'userdel', '-r', username], check=True)
