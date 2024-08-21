@@ -155,7 +155,7 @@ async def create_user(event):
 
     # Show expiry date in the human-readable user's timezone, show notes, ssh command, etc.
     # Example for human readable time: 21st July 2024, 10:00 PM IST
-    ist = pytz.timezone("Asia/Kolkata")
+    ist = pytz.timezone(TIME_ZONE)
     expiry_date_ist = datetime.fromtimestamp(expiry_time, ist)
     day_suffix = get_day_suffix(expiry_date_ist.day)
     expiry_date_str = expiry_date_ist.strftime(f"%d{day_suffix} %B %Y, %I:%M %p IST")
@@ -273,10 +273,16 @@ async def list_users(event):
     if users:
         response = "👥 Users:\n"
         for username, expiry_time in users:
-            expiry_date = datetime.fromtimestamp(expiry_time).strftime(
-                "%Y-%m-%d %H:%M:%S"
+            ist = pytz.timezone(TIME_ZONE)
+            expiry_date_ist = datetime.fromtimestamp(expiry_time, ist)
+            day_suffix = get_day_suffix(expiry_date_ist.day)
+            expiry_date_str = expiry_date_ist.strftime(
+                f"%d{day_suffix} %B %Y, %I:%M %p IST"
             )
-            response += f"✨ `{username}`: `{expiry_date}`\n"
+
+            response += (
+                f"✨ Username: `{username}`\n   Expiry Date: `{expiry_date_str}`\n\n"
+            )
     else:
         response = "🔍 No users found."
 
