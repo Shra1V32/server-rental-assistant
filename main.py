@@ -37,7 +37,9 @@ CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL,
     password TEXT NOT NULL,
-    expiry_time INTEGER NOT NULL
+    expiry_time INTEGER NOT NULL,
+    is_expired BOOLEAN DEFAULT False,
+    sent_expiry_notification BOOLEAN DEFAULT False
 )
 """
 )
@@ -174,6 +176,10 @@ async def delete_user(event):
 
     if result:
         await event.respond(f"🗑️ Deleting user `{username}`...")
+        # remove all the running processes for the user
+        subprocess.run(["sudo", "pkill", "-u", username], check=False)
+
+        # delete the user from the system
         subprocess.run(["sudo", "userdel", "-r", username], check=True)
 
         cursor.execute("DELETE FROM users WHERE username=?", (username,))
@@ -279,10 +285,30 @@ async def notify_expiry():
         expired_users = cursor.fetchall()
 
         for _, username in expired_users:
-            await client.send_message(
-                ADMIN_ID,
-                f"⏰ Your plan has expired, `{username}`! Please renew soon. 😊",
+            # Check the database if is_expired is False
+            cursor.execute(
+                "SELECT sent_expiry_notification FROM users WHERE username=?",
+                (username,),
             )
+            result = cursor.fetchone()
+            if result and not result[0]:  # If the user has not been notified
+                cursor.execute(
+                    "UPDATE users SET sent_expiry_notification=1 WHERE username=?",
+                    (username,),
+                )
+                conn.commit()
+
+                # Send a notification to the admin, include the start time, end time, and username
+                # Add a button to delete the user from the database & server
+                await client.send_message(
+                    ADMIN_ID,
+                    f"⚠️ Plan for user `{username}` has expired. Please take necessary action.",
+                    buttons=[
+                        [
+                            ("Delete User", f"/delete_user {username}"),
+                        ]
+                    ],
+                )
             # subprocess.run(['sudo', 'userdel', '-r', username], check=True)
             # cursor.execute('DELETE FROM users WHERE username=?', (username,))
             # conn.commit()
