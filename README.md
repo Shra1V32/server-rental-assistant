@@ -6,12 +6,13 @@ Server Plan Bot is a Telegram bot designed to manage user accounts on a server. 
 
 - **Create User**: Create a new user with a specified plan duration.
 - **Delete User**: Delete an existing user.
+- **Secure Password**: Generate a secure, memorable password for each user.
+- **Admin Commands**: Ensures only admin is accessing the commands.
 - **Extend Plan**: Extend the plan duration for a user.
 - **List Users**: List all users along with their plan expiry dates.
 - **Notify Expiry**: Periodically notify users of their plan expiry.
 
 # To Do
-- Implement checking for authorized telegram users
 - Link user id with telegram id
 - Notify user of expiry tagging them with their telegram id
 - Implement a way to notify user of expiry before it happens
@@ -45,9 +46,10 @@ Server Plan Bot is a Telegram bot designed to manage user accounts on a server. 
     API_ID = your_api_id
     API_HASH = "your_api_hash"
     BOT_TOKEN = "your_bot_token"
+    ADMIN_ID = your_admin_id
     ```
     Replace `your_api_id`, `your_api_hash`, and `your_bot_token` with your Telegram API ID, API hash, and bot token, respectively.
-    > Note: API_ID must not be enclosed in quotes.
+    > Note: API_ID & ADMIN_ID must NOT be enclosed in quotes.
 
 4. **Initialize the SQLite database**:
     The database will be automatically created and initialized when you run the bot for the first time.
