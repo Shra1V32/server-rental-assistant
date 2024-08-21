@@ -7,17 +7,22 @@ import subprocess
 import time
 from datetime import datetime, timedelta
 
+import pytz
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 
-load_dotenv()
+from constants import (
+    ADMIN_ID,
+    API_HASH,
+    API_ID,
+    BE_NOTED_TEXT,
+    BOT_TOKEN,
+    SSH_HOSTNAME,
+    SSH_PORT,
+    TIME_ZONE,
+)
 
-api_id = os.getenv("API_ID")
-api_hash = os.getenv("API_HASH")
-bot_token = os.getenv("BOT_TOKEN")
-admin_id = int(os.getenv("ADMIN_ID"))
-
-client = TelegramClient("server_plan_bot", api_id, api_hash).start(bot_token=bot_token)
+client = TelegramClient("server_plan_bot", API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
 # SQLite Database connection
 conn = sqlite3.connect("server_plan.db")
@@ -39,7 +44,14 @@ conn.commit()
 
 # Function to check if the user is authorized
 def is_authorized(user_id):
-    return user_id == admin_id
+    return user_id == ADMIN_ID
+
+
+def get_day_suffix(day):
+    if 11 <= day <= 13:
+        return "th"
+    else:
+        return {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
 
 
 # Function to generate a secure, memorable password
@@ -84,7 +96,17 @@ def create_system_user(username, password):
             text=True,
         ).stdout.strip()
         subprocess.run(
-            ["sudo", "useradd", "-m", "-p", hashed_password, username], check=True
+            [
+                "sudo",
+                "useradd",
+                "-m",
+                "-s",
+                "/bin/bash",
+                "-p",
+                hashed_password,
+                username,
+            ],
+            check=True,
         )
         print(f"System user {username} created successfully.")
     except subprocess.CalledProcessError as e:
@@ -131,10 +153,28 @@ async def create_user(event):
     )
     conn.commit()
 
-    expiry_date = datetime.fromtimestamp(expiry_time).strftime("%Y-%m-%d %H:%M:%S")
-    await event.respond(
-        f"✨ User `{username}` created with password `{password}`.\n📅 Plan expires on `{expiry_date}`."
+    # Show expiry date in the human-readable user's timezone, show notes, ssh command, etc.
+    # Example for human readable time: 21st July 2024, 10:00 PM IST
+    ist = pytz.timezone("Asia/Kolkata")
+    expiry_date_ist = datetime.fromtimestamp(expiry_time, ist)
+    day_suffix = get_day_suffix(expiry_date_ist.day)
+    expiry_date_str = expiry_date_ist.strftime(f"%d{day_suffix} %B %Y, %I:%M %p IST")
+
+    ssh_command = "ssh " + username + "@" + SSH_HOSTNAME + " -p " + SSH_PORT
+
+    message_str = (
+        f"✅ User `{username}` created successfully.\n\n"
+        f"🔐 Username: `{username}`\n"
+        f"🔑 Password: `{password}`\n"
+        f"📅 Expiry Date: {expiry_date_str}\n"
+        f"\n"
+        f"ℹ️ Notes:\n"
+        f"- For SSH access, use the following command:\n"
+        f"  `{ssh_command}`\n"
+        f"\n"
+        f"🔒 Your server is ready to use. Enjoy!"
     )
+    await event.respond(message_str)
 
 
 # Command to delete a user

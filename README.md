@@ -47,6 +47,8 @@ Server Plan Bot is a Telegram bot designed to manage user accounts on a server. 
     API_HASH = "your_api_hash"
     BOT_TOKEN = "your_bot_token"
     ADMIN_ID = your_admin_id
+    SSH_HOSTNAME = "your_ssh_host"
+    SSH_PORT = your_ssh_port
     ```
     Replace `your_api_id`, `your_api_hash`, and `your_bot_token` with your Telegram API ID, API hash, and bot token, respectively.
     > Note: API_ID & ADMIN_ID must NOT be enclosed in quotes.
