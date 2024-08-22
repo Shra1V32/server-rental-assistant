@@ -96,11 +96,87 @@ def create_system_user(username, password):
 
 
 # Function to parse time duration strings
+# Example: 7d -> 7 days, 5h -> 5 hours, 10m -> 10 minutes, 30s -> 30 seconds
+# 1d2h -> 1 day 2 hours, 3h30m -> 3 hours 30 minutes
+# Returns the duration in seconds
 def parse_duration(duration_str):
-    time_units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
-    unit = duration_str[-1]
-    value = int(duration_str[:-1])
-    return value * time_units.get(unit, 0)
+    duration_str = duration_str.lower()
+    total_seconds = 0
+    current_number = ""
+    for char in duration_str:
+        if char.isdigit():
+            current_number += char
+        else:
+            if char == "d":
+                total_seconds += int(current_number) * 24 * 60 * 60
+            elif char == "h":
+                total_seconds += int(current_number) * 60 * 60
+            elif char == "m":
+                total_seconds += int(current_number) * 60
+            elif char == "s":
+                total_seconds += int(current_number)
+            current_number = ""
+    return total_seconds
+
+
+async def reduce_plan_helper(event, username, reduced_duration_seconds):
+    cursor.execute("SELECT expiry_time FROM users WHERE username=?", (username,))
+    result = cursor.fetchone()
+
+    if result:
+        expiry_time = result[0]
+        if expiry_time - reduced_duration_seconds < int(time.time()):
+            await event.respond(
+                f"❌ Cannot reduce plan for user `{username}` below current time."
+            )
+            return
+
+        new_expiry_time = expiry_time - reduced_duration_seconds
+
+        cursor.execute(
+            """
+        UPDATE users
+        SET expiry_time=?
+        WHERE username=?
+        """,
+            (new_expiry_time, username),
+        )
+        conn.commit()
+
+        new_expiry_date = datetime.fromtimestamp(new_expiry_time).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        await event.respond(
+            f"🔄 User `{username}`'s plan reduced to `{new_expiry_date}`."
+        )
+    else:
+        await event.respond(f"❌ User `{username}` not found.")
+
+
+@client.on(events.NewMessage(pattern="/reduce_plan"))
+async def reduce_plan(event):
+    if not is_authorized(event.sender_id):
+        await event.respond("❌ You are not authorized to use this command.")
+        return
+
+    args = event.message.text.split()
+    if len(args) < 3:
+        await event.respond(
+            "❓ Usage: /reduce_plan <username> <reduced_duration> \nFor example: `/reduce_plan john 7d`"
+        )
+        return
+
+    username = args[1]
+    reduced_duration_str = args[2]
+    reduced_duration_seconds = parse_duration(reduced_duration_str)
+
+    if username == "all":
+        cursor.execute("SELECT username FROM users")
+        usernames = cursor.fetchall()
+        for row in usernames:
+            await reduce_plan_helper(event, row[0], reduced_duration_seconds)
+    else:
+        await reduce_plan_helper(event, username, reduced_duration_seconds)
 
 
 # Command to create a user and set plan expiry
