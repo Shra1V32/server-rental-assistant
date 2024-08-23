@@ -2,7 +2,31 @@ import os
 
 import dotenv
 
+
+# Check if the environment variables are set and not empty. If not, raise an exception.
+def check_env():
+    if (
+        not os.getenv("API_ID")
+        or not os.getenv("API_HASH")
+        or not os.getenv("BOT_TOKEN")
+        or not os.getenv("ADMIN_ID")
+    ):
+        raise Exception(
+            "Bot Environment variables are not set. Please set them in .env file."
+        )
+    if not os.getenv("SSH_PORT") or not os.getenv("SSH_HOSTNAME"):
+        raise Exception(
+            "SSH Environment variables are not set. Please set them in .env file."
+        )
+
+    if not os.getenv("GROUP_ID"):
+        # Raise warning if GROUP_ID is not set
+        print("Warning: GROUP_ID is not set in .env file. Continuing without it.")
+
+
 dotenv.load_dotenv()
+
+check_env()
 
 TIME_ZONE = "Asia/Kolkata"
 
