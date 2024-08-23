@@ -120,6 +120,7 @@ def parse_duration(duration_str):
     return total_seconds
 
 
+# Helper function to reduce a user's plan
 async def reduce_plan_helper(event, username, reduced_duration_seconds):
     cursor.execute("SELECT expiry_time FROM users WHERE username=?", (username,))
     result = cursor.fetchone()
@@ -327,7 +328,7 @@ async def extend_plan_helper(event, username, additional_seconds):
         await event.respond(f"❌ User `{username}` not found.")
 
 
-# Command to list all users along with their expiry dates
+# Command to list all users along with their expiry dates and remaining time
 @client.on(events.NewMessage(pattern="/list_users"))
 async def list_users(event):
     if not is_authorized(event.sender_id):
@@ -347,9 +348,14 @@ async def list_users(event):
                 f"%d{day_suffix} %B %Y, %I:%M %p IST"
             )
 
-            response += (
-                f"✨ Username: `{username}`\n   Expiry Date: `{expiry_date_str}`\n\n"
-            )
+            remaining_time = expiry_date_ist - datetime.now(pytz.utc).astimezone(ist)
+            remaining_time_str = ""
+            if remaining_time.days > 0:
+                remaining_time_str += f"{remaining_time.days} days, "
+            remaining_time_str += f"{remaining_time.seconds // 3600} hours, "
+            remaining_time_str += f"{(remaining_time.seconds // 60) % 60} minutes"
+
+            response += f"✨ Username: `{username}`\n   Expiry Date: `{expiry_date_str}`\n   Remaining Time: `{remaining_time_str}`\n\n"
     else:
         response = "🔍 No users found."
 
@@ -357,46 +363,57 @@ async def list_users(event):
 
 
 # Periodic task to notify users of plan expiry
+# We first notify in the group before 12 hours of expiry
+# The GROUP_ID must be set in the .env file for this to work
 async def notify_expiry():
     while True:
         now = int(time.time())
+        twelve_hours_from_now = now + (12 * 60 * 60)  # 12 hours in seconds
         cursor.execute(
-            "SELECT user_id, username FROM users WHERE expiry_time<=?", (now,)
+            "SELECT user_id, username FROM users WHERE expiry_time<=? AND expiry_time>? AND sent_expiry_notification=false",
+            (twelve_hours_from_now, now),
         )
-        expired_users = cursor.fetchall()
+        expiring_users = cursor.fetchall()
 
-        for _, username in expired_users:
-            # Check the database if is_expired is False
+        for _, username in expiring_users:
             cursor.execute(
-                "SELECT sent_expiry_notification FROM users WHERE username=?",
+                "UPDATE users SET sent_expiry_notification=true WHERE username=?",
                 (username,),
             )
-            result = cursor.fetchone()
-            if result and not result[0]:  # If the user has not been notified
-                cursor.execute(
-                    "UPDATE users SET sent_expiry_notification=1 WHERE username=?",
-                    (username,),
-                )
-                conn.commit()
+            conn.commit()
 
-                # Send a notification to the admin, include the start time, end time, and username
-                # Add a button to delete the user from the database & server
-                await client.send_message(
-                    ADMIN_ID,
-                    f"⚠️ Plan for user `{username}` has expired. Please take necessary action.",
-                    buttons=[
-                        [
-                            Button.inline(
-                                "Delete user", data=f"delete_user {username}"
-                            ),
-                            Button.inline("Cancel", data=f"cancel {username}"),
-                        ],
-                    ],
-                )
-            # subprocess.run(['sudo', 'userdel', '-r', username], check=True)
-            # cursor.execute('DELETE FROM users WHERE username=?', (username,))
-            # conn.commit()
+            expiry_time = cursor.execute(
+                "SELECT expiry_time FROM users WHERE username=?", (username,)
+            ).fetchone()[0]
 
+            # Send a notification to the group, include the username and the remaining time
+            remaining_time = datetime.fromtimestamp(expiry_time) - datetime.now()
+
+            # Mention remaining time in human-readable format
+            # Example: expire in 8 hours, 30 minutes
+            remaining_time_str = ""
+            if remaining_time.days > 0:
+                remaining_time_str += f"{remaining_time.days} days, "
+            remaining_time_str += f"{remaining_time.seconds // 3600} hours, "
+            remaining_time_str += f"{(remaining_time.seconds // 60) % 60} minutes"
+
+            message = (
+                f"⏰ Plan for user `{username}` will expire in {remaining_time_str}."
+            )
+            if not GROUP_ID:
+                print(
+                    "Warning: GROUP_ID is not set in .env file. Skipping group notification."
+                )
+                await client.send_message(ADMIN_ID, message)
+            else:
+                try:
+                    await client.send_message(GROUP_ID, message)
+                except Exception as e:
+                    # Send to admin if there is an error sending to the group
+                    await client.send_message(
+                        ADMIN_ID, f"❌ Error sending message: {e}"
+                    )
+                    await client.send_message(ADMIN_ID, message)
         await asyncio.sleep(60)  # Check every minute
 
 
@@ -408,6 +425,9 @@ async def handle_button(event):
         prev_msg = (
             f"⚠️ Plan for user `{username}` has expired. Please take necessary action."
         )
+        # Update is_expired to True
+        cursor.execute("UPDATE users SET is_expired=true WHERE username=?", (username,))
+        conn.commit()
 
         await event.edit(prev_msg + "\n\n" + "🚫 Action canceled.")
     elif event.data.startswith(b"delete_user"):

@@ -9,3 +9,6 @@
 
 # Ignore database file
 server_plan.db
+
+# Ignore notes.txt
+notes.txt
