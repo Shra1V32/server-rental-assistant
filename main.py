@@ -18,6 +18,7 @@ from constants import (
     API_ID,
     BE_NOTED_TEXT,
     BOT_TOKEN,
+    GROUP_ID,
     NOUNS,
     SSH_HOSTNAME,
     SSH_PORT,
