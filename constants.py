@@ -5,8 +5,12 @@ import dotenv
 dotenv.load_dotenv()
 
 TIME_ZONE = "Asia/Kolkata"
-BE_NOTED_TEXT = """ 
-"""  # Add your notes text to show on /create_user command
+
+# Take data from the notes.txt file
+try:
+    BE_NOTED_TEXT = open("notes.txt", "r").read()
+except FileNotFoundError:
+    BE_NOTED_TEXT = ""
 SSH_PORT = os.getenv("SSH_PORT")
 SSH_HOSTNAME = os.getenv("SSH_HOSTNAME")
 

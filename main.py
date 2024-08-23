@@ -229,6 +229,7 @@ async def create_user(event):
         f"ℹ️ Notes:\n"
         f"- For SSH access, use the following command:\n"
         f"  `{ssh_command}`\n"
+        f"{BE_NOTED_TEXT}"
         f"\n"
         f"🔒 Your server is ready to use. Enjoy!"
     )
