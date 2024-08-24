@@ -335,12 +335,12 @@ async def list_users(event):
         await event.respond("❌ You are not authorized to use this command.")
         return
 
-    cursor.execute("SELECT username, expiry_time FROM users")
+    cursor.execute("SELECT username, expiry_time, is_expired FROM users")
     users = cursor.fetchall()
 
     if users:
         response = "👥 Users:\n"
-        for username, expiry_time in users:
+        for username, expiry_time, is_expired in users:
             ist = pytz.timezone(TIME_ZONE)
             expiry_date_ist = datetime.fromtimestamp(expiry_time, ist)
             day_suffix = get_day_suffix(expiry_date_ist.day)
@@ -348,14 +348,28 @@ async def list_users(event):
                 f"%d{day_suffix} %B %Y, %I:%M %p IST"
             )
 
-            remaining_time = expiry_date_ist - datetime.now(pytz.utc).astimezone(ist)
-            remaining_time_str = ""
-            if remaining_time.days > 0:
-                remaining_time_str += f"{remaining_time.days} days, "
-            remaining_time_str += f"{remaining_time.seconds // 3600} hours, "
-            remaining_time_str += f"{(remaining_time.seconds // 60) % 60} minutes"
+            if not is_expired:
 
-            response += f"✨ Username: `{username}`\n   Expiry Date: `{expiry_date_str}`\n   Remaining Time: `{remaining_time_str}`\n\n"
+                remaining_time = expiry_date_ist - datetime.now(pytz.utc).astimezone(
+                    ist
+                )
+                remaining_time_str = ""
+                if remaining_time.days > 0:
+                    remaining_time_str += f"{remaining_time.days} days, "
+                remaining_time_str += f"{remaining_time.seconds // 3600} hours, "
+                remaining_time_str += f"{(remaining_time.seconds // 60) % 60} minutes"
+
+                response += f"✨ Username: `{username}`\n   Expiry Date: `{expiry_date_str}`\n   Remaining Time: `{remaining_time_str}`\n   Status: `Active`\n\n"
+
+            else:  # If the user is expired, show the status as Expired
+                elased_time = datetime.now(pytz.utc).astimezone(ist) - expiry_date_ist
+                elased_time_str = ""
+                if elased_time.days > 0:
+                    elased_time_str += f"{elased_time.days} days, "
+                elased_time_str += f"{elased_time.seconds // 3600} hours, "
+                elased_time_str += f"{(elased_time.seconds // 60) % 60} minutes"
+
+                response += f"❌ Username: `{username}`\n   Expiry Date: `{expiry_date_str}`\n   Elasped Time: `{elased_time_str}`\n   Status: `Expired`\n\n"
     else:
         response = "🔍 No users found."
 
