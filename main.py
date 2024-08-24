@@ -195,6 +195,9 @@ async def create_user(event):
         )
         return
 
+    # Send acknowledgement message
+    await event.respond("🔐 Creating user...")
+
     username = args[1]
     plan_duration_str = args[2]
     plan_duration_seconds = parse_duration(plan_duration_str)
@@ -285,6 +288,9 @@ async def extend_plan(event):
             "❓ Usage: /extend_plan <username> <additional_duration>\nFor example: `/extend_plan john 5d`"
         )
         return
+
+    # Send acknowledgement message
+    await event.respond("🔄 Extending plan...")
 
     username = args[1]
     additional_duration_str = args[2]
