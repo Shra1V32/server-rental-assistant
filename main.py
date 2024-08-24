@@ -395,6 +395,7 @@ async def notify_expiry():
         )
         expiring_users = cursor.fetchall()
 
+        # Check for expiring users and notify in the group
         for _, username in expiring_users:
             cursor.execute(
                 "UPDATE users SET sent_expiry_notification=true WHERE username=?",
@@ -434,6 +435,29 @@ async def notify_expiry():
                         ADMIN_ID, f"❌ Error sending message: {e}"
                     )
                     await client.send_message(ADMIN_ID, message)
+
+        # Check expired users and notify admin to take necessary action
+        cursor.execute(
+            "SELECT username FROM users WHERE expiry_time<=? AND is_expired=false",
+            (now,),
+        )
+        expired_users = cursor.fetchall()
+
+        for row in expired_users:
+            username = row[0]
+            cursor.execute(
+                "UPDATE users SET is_expired=true WHERE username=?", (username,)
+            )
+            conn.commit()
+            await client.send_message(
+                ADMIN_ID,
+                f"⚠️ Plan for user `{username}` has expired. Please take necessary action.",
+                buttons=[
+                    [Button.inline("Cancel", data=f"cancel {username}")],
+                    [Button.inline("Delete User", data=f"delete_user {username}")],
+                ],
+            )
+
         await asyncio.sleep(60)  # Check every minute
 
 
