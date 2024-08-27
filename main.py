@@ -69,6 +69,22 @@ def generate_password():
     return password
 
 
+# Get /etc/passwd file data
+def get_passwd_data():
+    with open("/etc/passwd", "r") as f:
+        passwd_data = f.readlines()
+    return passwd_data
+
+
+# Function to check if username exists in passwd file
+def is_user_exists(username):
+    passwd_data = get_passwd_data()
+    for line in passwd_data:
+        if line.startswith(username + ":"):
+            return True
+    return False
+
+
 # Function to execute shell commands to create a user
 def create_system_user(username, password):
     try:
@@ -200,6 +216,11 @@ async def create_user(event):
 
     username = args[1]
     plan_duration_str = args[2]
+
+    if is_user_exists(username):
+        await event.respond(f"❌ User `{username}` already exists.")
+        return
+
     plan_duration_seconds = parse_duration(plan_duration_str)
     password = generate_password()
 
@@ -255,6 +276,22 @@ async def delete_user(event):
     username = event.message.text.split()[1]
     cursor.execute("SELECT username FROM users WHERE username=?", (username,))
     result = cursor.fetchone()
+
+    # Check if the user exists from the passwd file
+    user_exists = is_user_exists(username)
+
+    if not user_exists:
+        await event.respond(f"❌ User `{username}` is not found in the system.")
+
+        # Ask if to delete the user from the database
+        await event.respond(
+            f"❓ Do you want to delete user `{username}` from the database?",
+            buttons=[
+                [Button.inline("Yes", data=f"clean_db {username}")],
+                [Button.inline("No", data="cancel")],
+            ],
+        )
+        return
 
     if result:
         await event.respond(f"🗑️ Deleting user `{username}`...")
