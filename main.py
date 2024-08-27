@@ -87,29 +87,26 @@ def is_user_exists(username):
 
 # Function to execute shell commands to create a user
 def create_system_user(username, password):
-    try:
-        hashed_password = subprocess.run(
-            ["openssl", "passwd", "-6", password],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        subprocess.run(
-            [
-                "sudo",
-                "useradd",
-                "-m",
-                "-s",
-                "/bin/bash",
-                "-p",
-                hashed_password,
-                username,
-            ],
-            check=True,
-        )
-        print(f"System user {username} created successfully.")
-    except subprocess.CalledProcessError as e:
-        print(f"Error creating user {username}: {e}")
+    hashed_password = subprocess.run(
+        ["openssl", "passwd", "-6", password],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        [
+            "sudo",
+            "useradd",
+            "-m",
+            "-s",
+            "/bin/bash",
+            "-p",
+            hashed_password,
+            username,
+        ],
+        check=True,
+    )
+    print(f"System user {username} created successfully.")
 
 
 # Function to parse time duration strings
@@ -226,7 +223,10 @@ async def create_user(event):
 
     expiry_time = int(time.time()) + plan_duration_seconds
 
-    create_system_user(username, password)
+    try:
+        create_system_user(username, password)
+    except Exception as e:
+        await event.respond(f"❌ Error creating user `{username}`: {e}")
 
     cursor.execute(
         """
@@ -486,6 +486,14 @@ async def notify_expiry():
                 "UPDATE users SET is_expired=true WHERE username=?", (username,)
             )
             conn.commit()
+
+            # Send expired message in the group
+            if GROUP_ID:
+                await client.send_message(
+                    GROUP_ID, f"❌ Plan for user `{username}` has expired."
+                )
+
+            # Send action notification to the admin
             await client.send_message(
                 ADMIN_ID,
                 f"⚠️ Plan for user `{username}` has expired. Please take necessary action.",
@@ -528,6 +536,11 @@ async def handle_button(event):
         cursor.execute("DELETE FROM users WHERE username=?", (username,))
         conn.commit()
         await event.edit(prev_msg + "\n\n" + f"✅ User `{username}` deleted.")
+    elif event.data.startswith(b"clean_db"):
+        username = event.data.decode().split()[1]
+        cursor.execute("DELETE FROM users WHERE username=?", (username,))
+        conn.commit()
+        await event.edit(f"✅ User `{username}` deleted from the database.")
 
     else:
         await event.edit("❌ Invalid action.")
