@@ -36,7 +36,7 @@ cursor.execute(
     """
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL,
+    username TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
     expiry_time INTEGER NOT NULL,
     is_expired BOOLEAN DEFAULT False,
