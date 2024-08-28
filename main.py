@@ -194,6 +194,34 @@ async def reduce_plan(event):
         await reduce_plan_helper(event, username, reduced_duration_seconds)
 
 
+# Helpful when you change the instances, and you want to sync with the database
+# Once you run this command, it will create a user for each user in the database
+# and set the expiry time to the database value, including the same passwords
+@client.on(events.NewMessage(pattern="/sync_db"))
+async def sync_db(event):
+    if not is_authorized(event.sender_id):
+        await event.respond("❌ You are not authorized to use this command.")
+        return
+
+    cursor.execute("SELECT username, password, expiry_time FROM users")
+    users = cursor.fetchall()
+
+    for username, password, expiry_time in users:
+        if not is_user_exists(username):
+            try:
+                create_system_user(username, password)
+            except Exception as e:
+                await event.respond(f"❌ Error creating user `{username}`: {e}")
+
+            conn.commit()
+            await client.send_message(
+                ADMIN_ID,
+                f"✅ User `{username}` created successfully with expiry time `{expiry_time}`.",
+            )
+
+    await event.respond("✅ Database synced with the system.")
+
+
 # Command to create a user and set plan expiry
 @client.on(events.NewMessage(pattern="/create_user"))
 async def create_user(event):
@@ -361,11 +389,16 @@ async def extend_plan_helper(event, username, additional_seconds):
         )
         conn.commit()
 
-        new_expiry_date = datetime.fromtimestamp(new_expiry_time).strftime(
-            "%Y-%m-%d %H:%M:%S"
+        # Show expiry date in the human-readable user's timezone
+        ist = pytz.timezone(TIME_ZONE)
+        new_expiry_date = datetime.fromtimestamp(new_expiry_time, ist)
+        day_suffix = get_day_suffix(new_expiry_date.day)
+        new_expiry_date_str = new_expiry_date.strftime(
+            f"%d{day_suffix} %B %Y, %I:%M %p IST"
         )
+
         await event.respond(
-            f"🔄 User `{username}`'s plan extended to `{new_expiry_date}`."
+            f"🔄 User `{username}`'s plan extended to `{new_expiry_date_str}`."
         )
     else:
         await event.respond(f"❌ User `{username}` not found.")
