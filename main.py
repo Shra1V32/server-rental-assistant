@@ -484,6 +484,21 @@ async def list_users(event):
     await event.respond(response)
 
 
+# List the currently using/ connected users
+@client.on(events.NewMessage(pattern="/who"))
+async def list_connected_users(event):
+    if not is_authorized(event.sender_id):
+        await event.respond("❌ You are not authorized to use this command.")
+        return
+
+    connected_users = subprocess.run(
+        ["w"], check=True, capture_output=True, text=True
+    ).stdout
+
+    # Send the connected users list as a table
+    await event.respond(f"```\n{connected_users}\n```")
+
+
 # Periodic task to notify users of plan expiry
 # We first notify in the group before 12 hours of expiry
 # The GROUP_ID must be set in the .env file for this to work
