@@ -113,7 +113,7 @@ def create_system_user(username, password):
 # Example: 7d -> 7 days, 5h -> 5 hours, 10m -> 10 minutes, 30s -> 30 seconds
 # 1d2h -> 1 day 2 hours, 3h30m -> 3 hours 30 minutes
 # Returns the duration in seconds
-def parse_duration(duration_str):
+def parse_duration(duration_str: str):
     duration_str = duration_str.lower()
     total_seconds = 0
     current_number = ""
@@ -133,6 +133,26 @@ def parse_duration(duration_str):
     return total_seconds
 
 
+# Parse the duration seconds to human readable format
+def parse_duration_to_human_readable(duration_seconds: int) -> str:
+    duration_str = ""
+    if duration_seconds > 0:
+        if duration_seconds // (24 * 3600) > 0:
+            duration_str += f"{duration_seconds // (24 * 3600)} days, "
+            duration_seconds %= 24 * 3600
+        if duration_seconds // 3600 > 0:
+            duration_str += f"{duration_seconds // 3600} hours, "
+            duration_seconds %= 3600
+        if duration_seconds // 60 > 0:
+            duration_str += f"{duration_seconds // 60} minutes, "
+            duration_seconds %= 60
+        if duration_seconds > 0:
+            duration_str += f"{duration_seconds} seconds"
+    else:
+        duration_str = "Expired"
+    return duration_str
+
+
 # Helper function to reduce a user's plan
 async def reduce_plan_helper(event, username, reduced_duration_seconds):
     cursor.execute("SELECT expiry_time FROM users WHERE username=?", (username,))
@@ -140,13 +160,13 @@ async def reduce_plan_helper(event, username, reduced_duration_seconds):
 
     if result:
         expiry_time = result[0]
-        if expiry_time - reduced_duration_seconds < int(time.time()):
+        new_expiry_time = expiry_time - reduced_duration_seconds
+
+        if new_expiry_time < int(time.time()):
             await event.respond(
-                f"❌ Cannot reduce plan for user `{username}` below current time."
+                f"❌ User `{username}` will already be expired with this duration."
             )
             return
-
-        new_expiry_time = expiry_time - reduced_duration_seconds
 
         cursor.execute(
             """
@@ -158,11 +178,19 @@ async def reduce_plan_helper(event, username, reduced_duration_seconds):
         )
         conn.commit()
 
-        new_expiry_date = datetime.fromtimestamp(new_expiry_time).strftime(
-            "%Y-%m-%d %H:%M:%S"
+        # Show expiry date in the human-readable user's timezone
+        ist = pytz.timezone(TIME_ZONE)
+        new_expiry_date = datetime.fromtimestamp(new_expiry_time, ist)
+        day_suffix = get_day_suffix(new_expiry_date.day)
+        new_expiry_date_str = new_expiry_date.strftime(
+            f"%d{day_suffix} %B %Y, %I:%M %p IST"
         )
+
+        # Print new expiry date, and duration reduced in human readable format
         await event.respond(
-            f"🔄 User `{username}`'s plan reduced to `{new_expiry_date}`."
+            f"🔄 User `{username}`'s plan reduced!"
+            f"\nNew expiry date: `{new_expiry_date_str}`"
+            f"\nDuration reduced by: `{parse_duration_to_human_readable(reduced_duration_seconds)}`"
         )
     else:
         await event.respond(f"❌ User `{username}` not found.")
@@ -276,17 +304,18 @@ async def create_user(event):
 
     message_str = (
         f"✅ User `{username}` created successfully.\n\n"
-        f"🔐 Username: `{username}`\n"
-        f"🔑 Password: `{password}`\n"
-        f"📅 Expiry Date: {expiry_date_str}\n"
+        f"🔐 **Username:** `{username}`\n"
+        f"🔑 **Password:** `{password}`\n"
+        f"📅 **Expiry Date:** {expiry_date_str}\n"
         f"\n"
-        f"ℹ️ Notes:\n"
-        f"- For SSH access, use the following command:\n"
-        f"  `{ssh_command}`\n"
-        f"{BE_NOTED_TEXT}"
-        f"\n"
-        f"🔒 Your server is ready to use. Enjoy!"
+        f"🔗 **SSH Command:**\n"
+        f"`{ssh_command}`\n"
     )
+
+    if BE_NOTED_TEXT:
+        message_str += f"**ℹ️ Notes:**\n{BE_NOTED_TEXT}\n"
+
+    message_str += f"\n🔒 Your server is ready to use. Enjoy!"
     await event.respond(message_str)
 
 
@@ -397,8 +426,11 @@ async def extend_plan_helper(event, username, additional_seconds):
             f"%d{day_suffix} %B %Y, %I:%M %p IST"
         )
 
+        # Print new expiry date, and duration extended in human readable format
         await event.respond(
-            f"🔄 User `{username}`'s plan extended to `{new_expiry_date_str}`."
+            f"🔄 User `{username}`'s plan extended!"
+            f"\nNew expiry date: `{new_expiry_date_str}`"
+            f"\nDuration extended by: `{parse_duration_to_human_readable(additional_seconds)}`"
         )
     else:
         await event.respond(f"❌ User `{username}` not found.")
@@ -415,7 +447,7 @@ async def list_users(event):
     users = cursor.fetchall()
 
     if users:
-        response = "👥 Users:\n"
+        response = f"👥 Total Users: {len(users)}\n\n"
         for username, expiry_time, is_expired in users:
             ist = pytz.timezone(TIME_ZONE)
             expiry_date_ist = datetime.fromtimestamp(expiry_time, ist)
