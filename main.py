@@ -411,8 +411,10 @@ async def extend_plan_helper(event, username, additional_seconds):
         cursor.execute(
             """
         UPDATE users
-        SET expiry_time=?
-        WHERE username=?
+        SET expiry_time = ?, 
+            sent_expiry_notification = false, 
+            is_expired = false 
+        WHERE username = ?;
         """,
             (new_expiry_time, username),
         )
