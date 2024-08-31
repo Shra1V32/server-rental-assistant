@@ -353,11 +353,11 @@ async def delete_user(event):
     if result:
         await event.respond(f"🗑️ Deleting user `{username}`...")
         # remove all the running processes for the user
-        subprocess.run(["sudo", "pkill", "-u", username], check=False)
+        await asyncio.create_subprocess_exec("sudo", "pkill", "-u", username)
 
         try:
             # delete the user from the system
-            subprocess.run(["sudo", "userdel", "-r", username], check=True)
+            await asyncio.create_subprocess_exec("sudo", "userdel", "-r", username)
         except subprocess.CalledProcessError as e:
             await event.respond(f"❌ Error deleting user `{username}`: {e}")
             return
@@ -540,6 +540,7 @@ async def notify_expiry():
             message = (
                 f"⏰ Plan for user `{username}` will expire in {remaining_time_str}."
             )
+            message += "\nPlease contact the admin if you want to extend the plan. 🔄"
             if not GROUP_ID:
                 print(
                     "Warning: GROUP_ID is not set in .env file. Skipping group notification."
