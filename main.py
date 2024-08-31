@@ -493,9 +493,11 @@ async def list_connected_users(event):
         await event.respond("❌ You are not authorized to use this command.")
         return
 
-    connected_users = subprocess.run(
-        ["w"], check=True, capture_output=True, text=True
-    ).stdout
+    connected_users = await asyncio.create_subprocess_shell(
+        "w", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+    stdout, _ = await connected_users.communicate()
+    connected_users = stdout.decode()
 
     # Send the connected users list as a table
     await event.respond(f"```\n{connected_users}\n```")
