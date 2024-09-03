@@ -153,6 +153,13 @@ def parse_duration_to_human_readable(duration_seconds: int) -> str:
     return duration_str
 
 
+def get_date_str(epoch: int):
+    ist = pytz.timezone(TIME_ZONE)
+    date = datetime.fromtimestamp(epoch, ist)
+    day_suffix = get_day_suffix(date.day)
+    return date.strftime(f"%d{day_suffix} %B %Y, %I:%M %p IST")
+
+
 # Helper function to reduce a user's plan
 async def reduce_plan_helper(event, username, reduced_duration_seconds):
     cursor.execute("SELECT expiry_time FROM users WHERE username=?", (username,))
@@ -179,13 +186,7 @@ async def reduce_plan_helper(event, username, reduced_duration_seconds):
         conn.commit()
 
         # Show expiry date in the human-readable user's timezone
-        ist = pytz.timezone(TIME_ZONE)
-        new_expiry_date = datetime.fromtimestamp(new_expiry_time, ist)
-        day_suffix = get_day_suffix(new_expiry_date.day)
-        new_expiry_date_str = new_expiry_date.strftime(
-            f"%d{day_suffix} %B %Y, %I:%M %p IST"
-        )
-
+        new_expiry_date_str = get_date_str(new_expiry_time)
         # Print new expiry date, and duration reduced in human readable format
         await event.respond(
             f"🔄 User `{username}`'s plan reduced!"
@@ -295,10 +296,7 @@ async def create_user(event):
 
     # Show expiry date in the human-readable user's timezone, show notes, ssh command, etc.
     # Example for human readable time: 21st July 2024, 10:00 PM IST
-    ist = pytz.timezone(TIME_ZONE)
-    expiry_date_ist = datetime.fromtimestamp(expiry_time, ist)
-    day_suffix = get_day_suffix(expiry_date_ist.day)
-    expiry_date_str = expiry_date_ist.strftime(f"%d{day_suffix} %B %Y, %I:%M %p IST")
+    expiry_date_str = get_date_str(expiry_time)
 
     ssh_command = "ssh " + username + "@" + SSH_HOSTNAME + " -p " + SSH_PORT
 
@@ -394,13 +392,29 @@ async def extend_plan(event):
         cursor.execute("SELECT username FROM users")
         usernames = cursor.fetchall()
         for row in usernames:
-            await extend_plan_helper(event, row[0], additional_seconds)
+            await extend_plan_helper(
+                event, row[0], additional_seconds, send_notification=False
+            )
+        # Send the final message after extending all users, mentioning the each user's expiry date
+        cursor.execute("SELECT username, expiry_time FROM users")
+        users = cursor.fetchall()
+        response = "🔄 All users' plans extended!\n\n"
+        response += "\n".join(
+            [
+                f"👤 User `{username}`\n   New expiry date: `{get_date_str(expiry_time)}`"
+                for username, expiry_time in users
+            ]
+        )
+        await event.respond(response)
     else:
         await extend_plan_helper(event, username, additional_seconds)
 
 
 # Helper function to extend a user's plan
-async def extend_plan_helper(event, username, additional_seconds):
+async def extend_plan_helper(
+    event, username, additional_seconds, send_notification=True
+):
+
     cursor.execute("SELECT expiry_time FROM users WHERE username=?", (username,))
     result = cursor.fetchone()
 
@@ -421,19 +435,15 @@ async def extend_plan_helper(event, username, additional_seconds):
         conn.commit()
 
         # Show expiry date in the human-readable user's timezone
-        ist = pytz.timezone(TIME_ZONE)
-        new_expiry_date = datetime.fromtimestamp(new_expiry_time, ist)
-        day_suffix = get_day_suffix(new_expiry_date.day)
-        new_expiry_date_str = new_expiry_date.strftime(
-            f"%d{day_suffix} %B %Y, %I:%M %p IST"
-        )
+        new_expiry_date_str = get_date_str(new_expiry_time)
 
-        # Print new expiry date, and duration extended in human readable format
-        await event.respond(
-            f"🔄 User `{username}`'s plan extended!"
-            f"\nNew expiry date: `{new_expiry_date_str}`"
-            f"\nDuration extended by: `{parse_duration_to_human_readable(additional_seconds)}`"
-        )
+        if send_notification:
+            # Print new expiry date, and duration extended in human readable format
+            await event.respond(
+                f"🔄 User `{username}`'s plan extended!"
+                f"\nNew expiry date: `{new_expiry_date_str}`"
+                f"\nDuration extended by: `{parse_duration_to_human_readable(additional_seconds)}`"
+            )
     else:
         await event.respond(f"❌ User `{username}` not found.")
 
@@ -453,11 +463,7 @@ async def list_users(event):
         for username, expiry_time, is_expired in users:
             ist = pytz.timezone(TIME_ZONE)
             expiry_date_ist = datetime.fromtimestamp(expiry_time, ist)
-            day_suffix = get_day_suffix(expiry_date_ist.day)
-            expiry_date_str = expiry_date_ist.strftime(
-                f"%d{day_suffix} %B %Y, %I:%M %p IST"
-            )
-
+            expiry_date_str = get_date_str(expiry_time)
             if not is_expired:
 
                 remaining_time = expiry_date_ist - datetime.now(pytz.utc).astimezone(
