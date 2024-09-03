@@ -161,7 +161,9 @@ def get_date_str(epoch: int):
 
 
 # Helper function to reduce a user's plan
-async def reduce_plan_helper(event, username, reduced_duration_seconds):
+async def reduce_plan_helper(
+    event, username, reduced_duration_seconds, send_notification=True
+):
     cursor.execute("SELECT expiry_time FROM users WHERE username=?", (username,))
     result = cursor.fetchone()
 
@@ -187,12 +189,14 @@ async def reduce_plan_helper(event, username, reduced_duration_seconds):
 
         # Show expiry date in the human-readable user's timezone
         new_expiry_date_str = get_date_str(new_expiry_time)
-        # Print new expiry date, and duration reduced in human readable format
-        await event.respond(
-            f"🔄 User `{username}`'s plan reduced!"
-            f"\nNew expiry date: `{new_expiry_date_str}`"
-            f"\nDuration reduced by: `{parse_duration_to_human_readable(reduced_duration_seconds)}`"
-        )
+
+        if send_notification:
+            # Print new expiry date, and duration reduced in human readable format
+            await event.respond(
+                f"🔄 User `{username}`'s plan reduced!"
+                f"\nNew expiry date: `{new_expiry_date_str}`"
+                f"\nDuration reduced by: `{parse_duration_to_human_readable(reduced_duration_seconds)}`"
+            )
     else:
         await event.respond(f"❌ User `{username}` not found.")
 
@@ -218,7 +222,21 @@ async def reduce_plan(event):
         cursor.execute("SELECT username FROM users")
         usernames = cursor.fetchall()
         for row in usernames:
-            await reduce_plan_helper(event, row[0], reduced_duration_seconds)
+            await reduce_plan_helper(
+                event, row[0], reduced_duration_seconds, send_notification=False
+            )
+
+        # Send the final message after reducing all users, mentioning the each user's expiry date
+        cursor.execute("SELECT username, expiry_time FROM users")
+        users = cursor.fetchall()
+        response = "🔄 All users' plans reduced!\n\n"
+        response += "\n".join(
+            [
+                f"👤 User `{username}`\n   New expiry date: `{get_date_str(expiry_time)}`"
+                for username, expiry_time in users
+            ]
+        )
+        await event.respond(response)
     else:
         await reduce_plan_helper(event, username, reduced_duration_seconds)
 
