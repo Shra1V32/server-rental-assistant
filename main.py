@@ -332,7 +332,7 @@ async def create_user(event):
         message_str += f"**ℹ️ Notes:**\n{BE_NOTED_TEXT}\n"
 
     message_str += f"\n🔒 Your server is ready to use. Enjoy!"
-    await client.send_message(event.chat_id, message_str, disable_web_page_preview=True)
+    await client.send_message(event.chat_id, message_str)
 
 
 # Command to delete a user
