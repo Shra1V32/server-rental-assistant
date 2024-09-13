@@ -48,8 +48,12 @@ conn.commit()
 
 
 # Function to check if the user is authorized
-def is_authorized(user_id):
+def is_authorized_user(user_id):
     return user_id == ADMIN_ID
+
+
+def is_authorized_group(group_id):
+    return group_id == GROUP_ID
 
 
 def get_day_suffix(day):
@@ -203,7 +207,7 @@ async def reduce_plan_helper(
 
 @client.on(events.NewMessage(pattern="/reduce_plan"))
 async def reduce_plan(event):
-    if not is_authorized(event.sender_id):
+    if not is_authorized_user(event.sender_id):
         await event.respond("❌ You are not authorized to use this command.")
         return
 
@@ -246,7 +250,7 @@ async def reduce_plan(event):
 # and set the expiry time to the database value, including the same passwords
 @client.on(events.NewMessage(pattern="/sync_db"))
 async def sync_db(event):
-    if not is_authorized(event.sender_id):
+    if not is_authorized_user(event.sender_id):
         await event.respond("❌ You are not authorized to use this command.")
         return
 
@@ -272,7 +276,7 @@ async def sync_db(event):
 # Command to create a user and set plan expiry
 @client.on(events.NewMessage(pattern="/create_user"))
 async def create_user(event):
-    if not is_authorized(event.sender_id):
+    if not is_authorized_user(event.sender_id):
         await event.respond("❌ You are not authorized to use this command.")
         return
 
@@ -338,7 +342,7 @@ async def create_user(event):
 # Command to delete a user
 @client.on(events.NewMessage(pattern="/delete_user"))
 async def delete_user(event):
-    if not is_authorized(event.sender_id):
+    if not is_authorized_user(event.sender_id):
         await event.respond("❌ You are not authorized to use this command.")
         return
 
@@ -388,7 +392,7 @@ async def delete_user(event):
 # Command to extend a user's plan
 @client.on(events.NewMessage(pattern="/extend_plan"))
 async def extend_plan(event):
-    if not is_authorized(event.sender_id):
+    if not is_authorized_user(event.sender_id):
         await event.respond("❌ You are not authorized to use this command.")
         return
 
@@ -469,7 +473,7 @@ async def extend_plan_helper(
 # Command to list all users along with their expiry dates and remaining time
 @client.on(events.NewMessage(pattern="/list_users"))
 async def list_users(event):
-    if not is_authorized(event.sender_id):
+    if not is_authorized_user(event.sender_id):
         await event.respond("❌ You are not authorized to use this command.")
         return
 
@@ -513,7 +517,7 @@ async def list_users(event):
 # List the currently using/ connected users
 @client.on(events.NewMessage(pattern="/who"))
 async def list_connected_users(event):
-    if not is_authorized(event.sender_id):
+    if not (is_authorized_user(event.sender_id) or is_authorized_group(event.chat_id)):
         await event.respond("❌ You are not authorized to use this command.")
         return
 
