@@ -379,9 +379,10 @@ async def delete_user(event):
 
         try:
             # delete the user from the system
-            await asyncio.create_subprocess_shell(
+            delete_user_process = await asyncio.create_subprocess_shell(
                 f"sudo userdel -r {username}", stdout=asyncio.subprocess.PIPE
             )
+            await delete_user_process.communicate()
         except subprocess.CalledProcessError as e:
             await event.respond(f"❌ Error deleting user `{username}`: {e}")
             return
