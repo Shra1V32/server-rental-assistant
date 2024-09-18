@@ -5,6 +5,7 @@ import sqlite3
 import string
 import subprocess
 import time
+import uuid
 from datetime import datetime, timedelta
 
 import pytz
@@ -36,6 +37,8 @@ cursor.execute(
     """
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid TEXT UNIQUE DEFAULT NULL,
+    tg_username TEXT DEFAULT NULL,
     username TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
     expiry_time INTEGER NOT NULL,
@@ -280,6 +283,8 @@ async def create_user(event):
         await event.respond("❌ You are not authorized to use this command.")
         return
 
+    BOT_USERNAME = await client.get_me()
+
     args = event.message.text.split()
     if len(args) < 3:
         await event.respond(
@@ -325,15 +330,40 @@ async def create_user(event):
     message_str = (
         f"✅ User `{username}` created successfully.\n\n"
         f"🔐 **Username:** `{username}`\n"
-        f"🔑 **Password:** `{password}`\n"
         f"📅 **Expiry Date:** {expiry_date_str}\n"
         f"\n"
         f"🔗 **SSH Command:**\n"
         f"`{ssh_command}`\n"
+        f"\n"
+        f"🔑 **Password:** Please click the button below to get your password.\n"
     )
 
     if BE_NOTED_TEXT:
         message_str += f"**ℹ️ Notes:**\n{BE_NOTED_TEXT}\n"
+
+    # Start the bot to get the password, button to get the password
+    # Generate a unique UUID for the user to authenticate for password retrieval
+    user_uuid = str(uuid.uuid4())
+
+    # Store the UUID in the database for later verification
+    cursor.execute(
+        """
+        UPDATE users
+        SET uuid=?
+        WHERE username=?
+        """,
+        (user_uuid, username),
+    )
+    conn.commit()
+
+    # Create a URL for the user to click and retrieve their password
+    password_url = f"https://t.me/{BOT_USERNAME.username}?start={user_uuid}"
+
+    await client.send_message(
+        event.chat_id,
+        message_str,
+        buttons=[[Button.url("Get Password", password_url)]],
+    )
 
     message_str += f"\n🔒 Your server is ready to use. Enjoy!"
     await client.send_message(event.chat_id, message_str)
@@ -383,6 +413,9 @@ async def delete_user(event):
                 f"sudo userdel -r {username}", stdout=asyncio.subprocess.PIPE
             )
             await delete_user_process.communicate()
+
+            # Wait for the process to finish
+            await delete_user_process.wait()
         except subprocess.CalledProcessError as e:
             await event.respond(f"❌ Error deleting user `{username}`: {e}")
             return
@@ -536,6 +569,37 @@ async def list_connected_users(event):
     await event.respond(f"```\n{connected_users}\n```")
 
 
+# Check if any parameters are passed with /start command
+@client.on(events.NewMessage(pattern="/start"))
+async def start_command(event):
+    if len(event.message.text.split()) > 1:
+        user_uuid = event.message.text.split()[1]
+        cursor.execute(
+            "SELECT username, password FROM users WHERE uuid=?", (user_uuid,)
+        )
+        result = cursor.fetchone()
+        if result:
+            # get the telegram user id, tg username
+            user_id = event.sender_id
+            tg_username = event.sender.username
+
+            # Add the tg username to the database
+            cursor.execute(
+                "UPDATE users SET tg_username=? WHERE username=?",
+                (tg_username, username),
+            )
+            conn.commit()
+
+            username, password = result
+            await event.respond(
+                f"🔑 **Username:** `{username}`\n🔒 **Password:** `{password}`"
+            )
+            await client.send_message(
+                ADMIN_ID,
+                f"🔑 Password sent to user `{username}` ({tg_username}) with user id `{user_id}`",
+            )
+
+
 # Periodic task to notify users of plan expiry
 # We first notify in the group before 12 hours of expiry
 # The GROUP_ID must be set in the .env file for this to work
@@ -654,7 +718,7 @@ async def handle_button(event):
             return
         cursor.execute("DELETE FROM users WHERE username=?", (username,))
         conn.commit()
-        await event.edit(prev_msg + "\n\n" + f"✅ User `{username}` deleted.")
+        await event.respond(f"✅ User `{username}` deleted.")
     elif event.data.startswith(b"clean_db"):
         username = event.data.decode().split()[1]
         cursor.execute("DELETE FROM users WHERE username=?", (username,))
