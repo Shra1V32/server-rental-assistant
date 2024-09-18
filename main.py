@@ -1,6 +1,7 @@
 import asyncio
 import os
 import random
+import re
 import sqlite3
 import string
 import subprocess
@@ -559,14 +560,32 @@ async def list_connected_users(event):
         await event.respond("❌ You are not authorized to use this command.")
         return
 
+    await send_connected_users(event)
+
+
+async def send_connected_users(event):
     connected_users = await asyncio.create_subprocess_shell(
         "w", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
     stdout, _ = await connected_users.communicate()
     connected_users = stdout.decode()
 
-    # Send the connected users list as a table
-    await event.respond(f"```\n{connected_users}\n```")
+    # Send the connected users list as a table with a button to regenerate the output
+    try:
+        await event.edit(
+            f"```\n{connected_users}\n```",
+            buttons=[Button.inline("Refresh", data="refresh_connected_users")],
+        )
+    except:
+        await event.respond(
+            f"```\n{connected_users}\n```",
+            buttons=[Button.inline("Refresh", data="refresh_connected_users")],
+        )
+
+
+@client.on(events.CallbackQuery(data="refresh_connected_users"))
+async def refresh_connected_users(event):
+    await send_connected_users(event)
 
 
 # Check if any parameters are passed with /start command
@@ -690,43 +709,45 @@ async def notify_expiry():
 
 
 # Handle button presses
-@client.on(events.CallbackQuery())
-async def handle_button(event):
-    if event.data.startswith(b"cancel"):
-        username = event.data.decode().split()[1]
-        prev_msg = (
-            f"⚠️ Plan for user `{username}` has expired. Please take necessary action."
-        )
-        # Update is_expired to True
-        cursor.execute("UPDATE users SET is_expired=true WHERE username=?", (username,))
-        conn.commit()
+@client.on(events.CallbackQuery(re.compile(r"cancel")))
+async def handle_cancel(event):
+    username = event.data.decode().split()[1]
+    prev_msg = (
+        f"⚠️ Plan for user `{username}` has expired. Please take necessary action."
+    )
+    # Update is_expired to True
+    cursor.execute("UPDATE users SET is_expired=true WHERE username=?", (username,))
+    conn.commit()
 
-        await event.edit(prev_msg + "\n\n" + "🚫 Action canceled.")
-    elif event.data.startswith(b"delete_user"):
-        username = event.data.decode().split()[1]
-        prev_msg = (
-            f"⚠️ Plan for user `{username}` has expired. Please take necessary action."
-        )
-        await client.send_message(ADMIN_ID, f"🗑️ Deleting user `{username}`...")
-        subprocess.run(["sudo", "pkill", "-u", username], check=False)
-        try:
-            subprocess.run(["sudo", "userdel", "-r", username], check=True)
-        except subprocess.CalledProcessError as e:
-            await event.edit(
-                prev_msg + "\n\n" + f"❌ Error deleting user `{username}`: {e}"
-            )
-            return
-        cursor.execute("DELETE FROM users WHERE username=?", (username,))
-        conn.commit()
-        await event.respond(f"✅ User `{username}` deleted.")
-    elif event.data.startswith(b"clean_db"):
-        username = event.data.decode().split()[1]
-        cursor.execute("DELETE FROM users WHERE username=?", (username,))
-        conn.commit()
-        await event.edit(f"✅ User `{username}` deleted from the database.")
+    await event.edit(prev_msg + "\n\n" + "🚫 Action canceled.")
 
-    else:
-        await event.edit("❌ Invalid action.")
+
+@client.on(events.CallbackQuery(re.compile(r"delete_user")))
+async def handle_delete_user(event):
+    username = event.data.decode().split()[1]
+    prev_msg = (
+        f"⚠️ Plan for user `{username}` has expired. Please take necessary action."
+    )
+    await client.send_message(ADMIN_ID, f"🗑️ Deleting user `{username}`...")
+    subprocess.run(["sudo", "pkill", "-u", username], check=False)
+    try:
+        subprocess.run(["sudo", "userdel", "-r", username], check=True)
+    except subprocess.CalledProcessError as e:
+        await event.edit(
+            prev_msg + "\n\n" + f"❌ Error deleting user `{username}`: {e}"
+        )
+        return
+    cursor.execute("DELETE FROM users WHERE username=?", (username,))
+    conn.commit()
+    await event.respond(f"✅ User `{username}` deleted.")
+
+
+@client.on(events.CallbackQuery(re.compile(r"clean_db")))
+async def handle_clean_db(event):
+    username = event.data.decode().split()[1]
+    cursor.execute("DELETE FROM users WHERE username=?", (username,))
+    conn.commit()
+    await event.edit(f"✅ User `{username}` deleted from the database.")
 
 
 # Start the bot and the periodic task
