@@ -342,6 +342,8 @@ async def create_user(event):
     if BE_NOTED_TEXT:
         message_str += f"**ℹ️ Notes:**\n{BE_NOTED_TEXT}\n"
 
+    message_str += f"\n🔒 Your server is ready to use. Enjoy!"
+
     # Start the bot to get the password, button to get the password
     # Generate a unique UUID for the user to authenticate for password retrieval
     user_uuid = str(uuid.uuid4())
@@ -365,9 +367,6 @@ async def create_user(event):
         message_str,
         buttons=[[Button.url("Get Password", password_url)]],
     )
-
-    message_str += f"\n🔒 Your server is ready to use. Enjoy!"
-    await client.send_message(event.chat_id, message_str)
 
 
 # Command to delete a user
@@ -516,12 +515,12 @@ async def list_users(event):
         await event.respond("❌ You are not authorized to use this command.")
         return
 
-    cursor.execute("SELECT username, expiry_time, is_expired FROM users")
+    cursor.execute("SELECT username, tg_username, expiry_time, is_expired FROM users")
     users = cursor.fetchall()
 
     if users:
         response = f"👥 Total Users: {len(users)}\n\n"
-        for username, expiry_time, is_expired in users:
+        for username, tg_username, expiry_time, is_expired in users:
             ist = pytz.timezone(TIME_ZONE)
             expiry_date_ist = datetime.fromtimestamp(expiry_time, ist)
             expiry_date_str = get_date_str(expiry_time)
@@ -536,7 +535,13 @@ async def list_users(event):
                 remaining_time_str += f"{remaining_time.seconds // 3600} hours, "
                 remaining_time_str += f"{(remaining_time.seconds // 60) % 60} minutes"
 
-                response += f"✨ Username: `{username}`\n   Expiry Date: `{expiry_date_str}`\n   Remaining Time: `{remaining_time_str}`\n   Status: `Active`\n\n"
+                response += (
+                    f"✨ Linux Username: `{username}`\n"
+                    f"   Telegram Username: `{tg_username}`\n"
+                    f"   Expiry Date: `{expiry_date_str}`\n"
+                    f"   Remaining Time: `{remaining_time_str}`\n"
+                    f"   Status: `Active`\n\n"
+                )
 
             else:  # If the user is expired, show the status as Expired
                 elased_time = datetime.now(pytz.utc).astimezone(ist) - expiry_date_ist
@@ -546,7 +551,13 @@ async def list_users(event):
                 elased_time_str += f"{elased_time.seconds // 3600} hours, "
                 elased_time_str += f"{(elased_time.seconds // 60) % 60} minutes"
 
-                response += f"❌ Username: `{username}`\n   Expiry Date: `{expiry_date_str}`\n   Elasped Time: `{elased_time_str}`\n   Status: `Expired`\n\n"
+                response += (
+                    f"❌ Username: `{username}`\n"
+                    f"   Telegram Username: `{tg_username}`\n"
+                    f"   Expiry Date: `{expiry_date_str}`\n"
+                    f"   Elapsed Time: `{elased_time_str}`\n"
+                    f"   Status: `Expired`\n\n"
+                )
     else:
         response = "🔍 No users found."
 
@@ -593,30 +604,41 @@ async def refresh_connected_users(event):
 async def start_command(event):
     if len(event.message.text.split()) > 1:
         user_uuid = event.message.text.split()[1]
+
         cursor.execute(
-            "SELECT username, password FROM users WHERE uuid=?", (user_uuid,)
+            "SELECT username, password, tg_username FROM users WHERE uuid=?",
+            (user_uuid,),
         )
+
         result = cursor.fetchone()
         if result:
+            username, password, tg_username = result
+
             # get the telegram user id, tg username
             user_id = event.sender_id
-            tg_username = event.sender.username
+            new_tg_username = event.sender.username
 
-            # Add the tg username to the database
-            cursor.execute(
-                "UPDATE users SET tg_username=? WHERE username=?",
-                (tg_username, username),
-            )
-            conn.commit()
+            if tg_username is None:
+                # Add the tg username to the database if not already set
+                cursor.execute(
+                    "UPDATE users SET tg_username=? WHERE username=?",
+                    (new_tg_username, username),
+                )
+                conn.commit()
 
-            username, password = result
-            await event.respond(
-                f"🔑 **Username:** `{username}`\n🔒 **Password:** `{password}`"
-            )
-            await client.send_message(
-                ADMIN_ID,
-                f"🔑 Password sent to user `{username}` ({tg_username}) with user id `{user_id}`",
-            )
+                await event.respond(
+                    f"🔑 **Username:** `{username}`\n🔒 **Password:** `{password}`"
+                )
+                await client.send_message(
+                    ADMIN_ID,
+                    f"🔑 Password sent to user `{username}` ({new_tg_username}) with user id `{user_id}`",
+                )
+            else:
+                await event.respond(
+                    "❌ This link has already been used to retrieve the password."
+                )
+        else:
+            await event.respond("❌ Invalid or expired link.")
 
 
 # Periodic task to notify users of plan expiry
@@ -640,9 +662,13 @@ async def notify_expiry():
             )
             conn.commit()
 
-            expiry_time = cursor.execute(
-                "SELECT expiry_time FROM users WHERE username=?", (username,)
-            ).fetchone()[0]
+            result = cursor.execute(
+                "SELECT expiry_time, tg_username FROM users WHERE username=?",
+                (username,),
+            ).fetchone()
+
+            expiry_time = result[0]
+            tg_username = result[1]
 
             # Send a notification to the group, include the username and the remaining time
             remaining_time = datetime.fromtimestamp(expiry_time) - datetime.now()
@@ -655,10 +681,8 @@ async def notify_expiry():
             remaining_time_str += f"{remaining_time.seconds // 3600} hours, "
             remaining_time_str += f"{(remaining_time.seconds // 60) % 60} minutes"
 
-            message = (
-                f"⏰ Plan for user `{username}` will expire in {remaining_time_str}."
-            )
-            message += "\nPlease contact the admin if you want to extend the plan. 🔄"
+            message = f"⏰ @{tg_username} Plan for user `{username}` will expire in {remaining_time_str}."
+            message += "\n\nPlease contact the admin if you want to extend the plan. 🔄"
             message += "\nYour data will be deleted after the expiry time. 🗑️"
             if not GROUP_ID:
                 print(
@@ -677,13 +701,14 @@ async def notify_expiry():
 
         # Check expired users and notify admin to take necessary action
         cursor.execute(
-            "SELECT username FROM users WHERE expiry_time<=? AND is_expired=false",
+            "SELECT tg_username, username FROM users WHERE expiry_time<=? AND is_expired=false",
             (now,),
         )
         expired_users = cursor.fetchall()
 
         for row in expired_users:
-            username = row[0]
+            tg_username = row[0]
+            username = row[1]
             cursor.execute(
                 "UPDATE users SET is_expired=true WHERE username=?", (username,)
             )
@@ -692,7 +717,8 @@ async def notify_expiry():
             # Send expired message in the group
             if GROUP_ID:
                 await client.send_message(
-                    GROUP_ID, f"❌ Plan for user `{username}` has expired."
+                    GROUP_ID,
+                    f"❌ @{tg_username} Your plan for the user: `{username}` has been expired.",
                 )
 
             # Send action notification to the admin
