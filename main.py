@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY AUTOINCREMENT,
     uuid TEXT UNIQUE DEFAULT NULL,
     tg_username TEXT DEFAULT NULL,
+    tg_first_name TEXT DEFAULT NULL,
+    tg_last_name TEXT DEFAULT NULL,
+    tg_user_id INTEGER DEFAULT NULL,
     username TEXT UNIQUE NOT NULL,
     password TEXT NOT NULL,
     expiry_time INTEGER NOT NULL,
@@ -515,12 +518,14 @@ async def list_users(event):
         await event.respond("❌ You are not authorized to use this command.")
         return
 
-    cursor.execute("SELECT username, tg_username, expiry_time, is_expired FROM users")
+    cursor.execute(
+        "SELECT username, tg_user_id, tg_first_name, expiry_time, is_expired FROM users"
+    )
     users = cursor.fetchall()
 
     if users:
         response = f"👥 Total Users: {len(users)}\n\n"
-        for username, tg_username, expiry_time, is_expired in users:
+        for username, tg_user_id, tg_user_first_name, expiry_time, is_expired in users:
             ist = pytz.timezone(TIME_ZONE)
             expiry_date_ist = datetime.fromtimestamp(expiry_time, ist)
             expiry_date_str = get_date_str(expiry_time)
@@ -536,8 +541,8 @@ async def list_users(event):
                 remaining_time_str += f"{(remaining_time.seconds // 60) % 60} minutes"
 
                 response += (
-                    f"✨ Linux Username: `{username}`\n"
-                    f"   Telegram Username: `{tg_username}`\n"
+                    f"✨ Username: `{username}`\n"
+                    f"   Telegram: [{tg_user_first_name}](tg://user?id={tg_user_id})\n"
                     f"   Expiry Date: `{expiry_date_str}`\n"
                     f"   Remaining Time: `{remaining_time_str}`\n"
                     f"   Status: `Active`\n\n"
@@ -553,7 +558,7 @@ async def list_users(event):
 
                 response += (
                     f"❌ Username: `{username}`\n"
-                    f"   Telegram Username: `{tg_username}`\n"
+                    f"   Telegram: [{tg_user_first_name}](tg://user?id={tg_user_id})\n"
                     f"   Expiry Date: `{expiry_date_str}`\n"
                     f"   Elapsed Time: `{elased_time_str}`\n"
                     f"   Status: `Expired`\n\n"
@@ -606,23 +611,35 @@ async def start_command(event):
         user_uuid = event.message.text.split()[1]
 
         cursor.execute(
-            "SELECT username, password, tg_username FROM users WHERE uuid=?",
+            "SELECT username, password, tg_user_id FROM users WHERE uuid=?",
             (user_uuid,),
         )
 
         result = cursor.fetchone()
         if result:
-            username, password, tg_username = result
+            username, password, tg_user_id = result
 
             # get the telegram user id, tg username
             user_id = event.sender_id
             new_tg_username = event.sender.username
+            user_first_name = event.sender.first_name
+            user_last_name = event.sender.last_name
 
-            if tg_username is None:
+            if tg_user_id is None:  # If the user is not already set
+                # Check if new_tg_username is not null
+                if new_tg_username is None:
+                    new_tg_username = user_id
+
                 # Add the tg username to the database if not already set
                 cursor.execute(
-                    "UPDATE users SET tg_username=? WHERE username=?",
-                    (new_tg_username, username),
+                    "UPDATE users SET tg_username=?, tg_user_id=?, tg_first_name=?, tg_last_name=? WHERE username=?",
+                    (
+                        new_tg_username,
+                        user_id,
+                        user_first_name,
+                        user_last_name,
+                        username,
+                    ),
                 )
                 conn.commit()
 
@@ -631,12 +648,19 @@ async def start_command(event):
                 )
                 await client.send_message(
                     ADMIN_ID,
-                    f"🔑 Password sent to user `{username}` ({new_tg_username}) with user id `{user_id}`",
+                    f"🔑 Password sent to user [{user_first_name}](tg://user?id={user_id}).",
                 )
             else:
-                await event.respond(
-                    "❌ This link has already been used to retrieve the password."
-                )
+                # Check if it's the same user who requested the password
+                # If not, don't send the password
+                if user_id == tg_user_id:
+                    await event.respond(
+                        f"🔑 **Username:** `{username}`\n🔒 **Password:** `{password}`"
+                    )
+                else:
+                    await event.respond(
+                        "❌ You are not authorized to get the password for this user."
+                    )
         else:
             await event.respond("❌ Invalid or expired link.")
 
@@ -649,13 +673,13 @@ async def notify_expiry():
         now = int(time.time())
         twelve_hours_from_now = now + (12 * 60 * 60)  # 12 hours in seconds
         cursor.execute(
-            "SELECT user_id, username FROM users WHERE expiry_time<=? AND expiry_time>? AND sent_expiry_notification=false",
+            "SELECT tg_user_id, tg_first_name, username FROM users WHERE expiry_time<=? AND expiry_time>? AND sent_expiry_notification=false",
             (twelve_hours_from_now, now),
         )
         expiring_users = cursor.fetchall()
 
         # Check for expiring users and notify in the group
-        for _, username in expiring_users:
+        for user_id, user_first_name, username in expiring_users:
             cursor.execute(
                 "UPDATE users SET sent_expiry_notification=true WHERE username=?",
                 (username,),
@@ -681,7 +705,7 @@ async def notify_expiry():
             remaining_time_str += f"{remaining_time.seconds // 3600} hours, "
             remaining_time_str += f"{(remaining_time.seconds // 60) % 60} minutes"
 
-            message = f"⏰ @{tg_username} Plan for user `{username}` will expire in {remaining_time_str}."
+            message = f"⏰ [{user_first_name}](tg://user?id={user_id}) Plan for user `{username}` will expire in {remaining_time_str}."
             message += "\n\nPlease contact the admin if you want to extend the plan. 🔄"
             message += "\nYour data will be deleted after the expiry time. 🗑️"
             if not GROUP_ID:
