@@ -17,6 +17,7 @@ Server Plan Bot is a Telegram bot designed to manage user accounts on a server. 
 # To Do
 - Automated action to add the server subscribers to the private telegram group.
 - Automated action to kick the user from the group when the plan expires.
+- Automated group link revoke when the user joins/leaves.
 - `subscribe` for the slots of the server, so that the user can get notified when the slot is available.
 - `unsubscribe` to stop the notifications.
 - `faq` to get the frequently asked questions.
