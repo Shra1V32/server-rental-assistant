@@ -15,9 +15,11 @@ Server Plan Bot is a Telegram bot designed to manage user accounts on a server. 
 - **Interactive User deletion**: Confirm user deletion before executing the command.
 
 # To Do
-- Link user id with telegram id
-- Notify user of expiry tagging them with their telegram id
-- Implement a way to notify user of expiry before it happens
+- Automated action to add the server subscribers to the private telegram group.
+- Automated action to kick the user from the group when the plan expires.
+- `subscribe` for the slots of the server, so that the user can get notified when the slot is available.
+- `unsubscribe` to stop the notifications.
+- `faq` to get the frequently asked questions.
 
 ## Prerequisites
 
