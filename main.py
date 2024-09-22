@@ -8,6 +8,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 
+import aiohttp
 import pytz
 from dotenv import load_dotenv
 from telethon import Button, TelegramClient, events
@@ -38,15 +39,31 @@ cursor.execute(
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY AUTOINCREMENT,
     uuid TEXT UNIQUE DEFAULT NULL,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    creation_time INTEGER DEFAULT (cast(strftime('%s', 'now') as int)),
+    expiry_time INTEGER NOT NULL,
+    is_expired BOOLEAN DEFAULT False,
     tg_username TEXT DEFAULT NULL,
     tg_first_name TEXT DEFAULT NULL,
     tg_last_name TEXT DEFAULT NULL,
     tg_user_id INTEGER DEFAULT NULL,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    expiry_time INTEGER NOT NULL,
-    is_expired BOOLEAN DEFAULT False,
     sent_expiry_notification BOOLEAN DEFAULT False
+)
+"""
+)
+conn.commit()
+
+# Create a table if not exists, to store the current payment details
+cursor.execute(
+    """
+CREATE TABLE IF NOT EXISTS payments (
+    payment_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    currency TEXT NOT NULL,
+    payment_date INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
 )
 """
 )
@@ -279,6 +296,15 @@ async def sync_db(event):
     await event.respond("✅ Database synced with the system.")
 
 
+# Function to get the exchange rate from USD to INR
+async def get_exchange_rate(from_currency, to_currency):
+    url = f"https://api.exchangerate-api.com/v4/latest/{from_currency}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            data = await response.json()
+            return data["rates"][to_currency]
+
+
 # Command to create a user and set plan expiry
 @client.on(events.NewMessage(pattern="/create_user"))
 async def create_user(event):
@@ -289,9 +315,9 @@ async def create_user(event):
     BOT_USERNAME = await client.get_me()
 
     args = event.message.text.split()
-    if len(args) < 3:
+    if len(args) < 4:  # Require amount and currency as arguments
         await event.respond(
-            "❓ Usage: /create_user <username> <plan_duration> \nFor example: `/create_user john 7d`"
+            "❓ Usage: /create_user <username> <plan_duration> <amount> <currency (INR/USD)> \nFor example: `/create_user john 7d 500 INR`"
         )
         return
 
@@ -300,6 +326,8 @@ async def create_user(event):
 
     username = args[1]
     plan_duration_str = args[2]
+    amount_str = args[3]
+    currency = args[4].upper()
 
     if is_user_exists(username):
         await event.respond(f"❌ User `{username}` already exists.")
@@ -314,15 +342,7 @@ async def create_user(event):
         create_system_user(username, password)
     except Exception as e:
         await event.respond(f"❌ Error creating user `{username}`: {e}")
-
-    cursor.execute(
-        """
-    INSERT INTO users (username, password, expiry_time)
-    VALUES (?, ?, ?)
-    """,
-        (username, password, expiry_time),
-    )
-    conn.commit()
+        return
 
     # Show expiry date in the human-readable user's timezone, show notes, ssh command, etc.
     # Example for human readable time: 21st July 2024, 10:00 PM IST
@@ -350,25 +370,183 @@ async def create_user(event):
     # Generate a unique UUID for the user to authenticate for password retrieval
     user_uuid = str(uuid.uuid4())
 
-    # Store the UUID in the database for later verification
-    cursor.execute(
-        """
-        UPDATE users
-        SET uuid=?
-        WHERE username=?
-        """,
-        (user_uuid, username),
-    )
-    conn.commit()
-
     # Create a URL for the user to click and retrieve their password
     password_url = f"https://t.me/{BOT_USERNAME.username}?start={user_uuid}"
+
+    if currency == "USD":
+        try:
+            amount = float(amount_str)
+            exchange_rate = await get_exchange_rate("USD", "INR")
+            amount_inr = amount * exchange_rate
+        except (ValueError, KeyError):
+            await event.respond("❌ Invalid amount or currency.")
+            return
+    elif currency == "INR":
+        try:
+            amount_inr = float(amount_str)
+        except ValueError:
+            await event.respond("❌ Invalid amount.")
+            return
+    else:
+        await event.respond("❌ Invalid currency. Only INR and USD are supported.")
+        return
+
+    payment_date = int(time.time())  # Record payment date and time
+
+    cursor.execute(
+        """
+    INSERT INTO users (uuid, username, password, expiry_time)
+    VALUES (?, ?, ?, ?)
+    """,
+        (user_uuid, username, password, expiry_time),
+    )
 
     await client.send_message(
         event.chat_id,
         message_str,
         buttons=[[Button.url("Get Password", password_url)]],
     )
+
+    # Generate a message for the admin
+    message_str = (
+        f"🔐 **Username:** `{username}`\n"
+        f"🔑 **Password:** `{password}`\n"
+        f"📅 **Expiry Date:** {expiry_date_str}\n"
+        f"💰 **Amount:** `{amount_inr:.2f} INR`\n"
+        f"📅 **Payment Date:** {get_date_str(payment_date)}\n"
+    )
+
+    # Record the payment details in the database
+    cursor.execute(
+        """
+    INSERT INTO payments (user_id, amount, currency, payment_date)
+    VALUES ((SELECT user_id FROM users WHERE username=?), ?, ?, ?)
+    """,
+        (username, amount_inr, "INR", payment_date),
+    )
+    conn.commit()
+
+    await client.send_message(ADMIN_ID, message_str)
+
+
+# Command to debit the amount from the admin
+@client.on(events.NewMessage(pattern="/debit"))
+async def debit_amount(event):
+    if not is_authorized_user(event.sender_id):
+        await event.respond("❌ You are not authorized to use this command.")
+        return
+
+    args = event.message.text.split()
+    if len(args) < 3:
+        await event.respond(
+            "❓ Usage: /debit <username> <amount> <currency>\nFor example: `/debit john 500 INR`"
+        )
+        return
+
+    username = args[1]
+    amount_str = args[2]
+    currency = args[3].upper()
+
+    if currency == "USD":
+        try:
+            amount = float(amount_str)
+            exchange_rate = await get_exchange_rate("USD", "INR")
+            amount_inr = amount * exchange_rate
+        except (ValueError, KeyError):
+            await event.respond("❌ Invalid amount or currency.")
+            return
+    elif currency == "INR":
+        try:
+            amount_inr = float(amount_str)
+        except ValueError:
+            await event.respond("❌ Invalid amount.")
+            return
+    else:
+        await event.respond("❌ Invalid currency. Only INR and USD are supported.")
+        return
+
+    payment_date = int(time.time())
+
+    cursor.execute(
+        """
+    INSERT INTO payments (user_id, amount, currency, payment_date)
+    VALUES ((SELECT user_id FROM users WHERE username=?), ?, ?, ?)
+    """,
+        (username, -amount_inr, "INR", payment_date),
+    )
+    conn.commit()
+
+    await event.respond(
+        f"✅ Amount `{amount_inr:.2f} INR` debited from user `{username}`."
+    )
+
+
+# Command to credit the amount to the admin
+@client.on(events.NewMessage(pattern="/credit"))
+async def credit_amount(event):
+    if not is_authorized_user(event.sender_id):
+        await event.respond("❌ You are not authorized to use this command.")
+        return
+
+    args = event.message.text.split()
+    if len(args) < 3:
+        await event.respond(
+            "❓ Usage: /credit <username> <amount> <currency>\nFor example: `/credit john 500 INR`"
+        )
+        return
+
+    username = args[1]
+    amount_str = args[2]
+    currency = args[3].upper()
+
+    if currency == "USD":
+        try:
+            amount = float(amount_str)
+            exchange_rate = await get_exchange_rate("USD", "INR")
+            amount_inr = amount * exchange_rate
+        except (ValueError, KeyError):
+            await event.respond("❌ Invalid amount or currency.")
+            return
+    elif currency == "INR":
+        try:
+            amount_inr = float(amount_str)
+        except ValueError:
+            await event.respond("❌ Invalid amount.")
+            return
+    else:
+        await event.respond("❌ Invalid currency. Only INR and USD are supported.")
+        return
+
+    payment_date = int(time.time())
+
+    cursor.execute(
+        """
+    INSERT INTO payments (user_id, amount, currency, payment_date)
+    VALUES ((SELECT user_id FROM users WHERE username=?), ?, ?, ?)
+    """,
+        (username, amount_inr, "INR", payment_date),
+    )
+    conn.commit()
+
+    await event.respond(
+        f"✅ Amount `{amount_inr:.2f} INR` credited to user `{username}`."
+    )
+
+
+# Command to show current earnings
+@client.on(events.NewMessage(pattern="/earnings"))
+async def show_earnings(event):
+    if not is_authorized_user(event.sender_id):
+        await event.respond("❌ You are not authorized to use this command.")
+        return
+
+    cursor.execute("SELECT SUM(amount) FROM payments")
+    total_earnings = cursor.fetchone()[0]
+
+    if total_earnings is None:
+        total_earnings = 0
+
+    await event.respond(f"💰 **Total Earnings:** `{total_earnings:.2f} INR`")
 
 
 # Command to delete a user
@@ -430,6 +608,8 @@ async def delete_user(event):
 
 
 # Command to extend a user's plan
+# (optional) If the username is "all", it will extend all users' plans
+# (optional) Accept the payment as an argument to extend the plan
 @client.on(events.NewMessage(pattern="/extend_plan"))
 async def extend_plan(event):
     if not is_authorized_user(event.sender_id):
@@ -439,7 +619,7 @@ async def extend_plan(event):
     args = event.message.text.split()
     if len(args) < 3:
         await event.respond(
-            "❓ Usage: /extend_plan <username> <additional_duration>\nFor example: `/extend_plan john 5d`"
+            "❓ Usage: /extend_plan <username> <additional_duration> [amount] [currency]\nFor example: `/extend_plan john 5d 500 INR`"
         )
         return
 
@@ -449,6 +629,29 @@ async def extend_plan(event):
     username = args[1]
     additional_duration_str = args[2]
     additional_seconds = parse_duration(additional_duration_str)
+
+    amount_inr = None
+    if len(args) >= 5:
+        amount_str = args[3]
+        currency = args[4].upper()
+
+        if currency == "USD":
+            try:
+                amount = float(amount_str)
+                exchange_rate = await get_exchange_rate("USD", "INR")
+                amount_inr = amount * exchange_rate
+            except (ValueError, KeyError):
+                await event.respond("❌ Invalid amount or currency.")
+                return
+        elif currency == "INR":
+            try:
+                amount_inr = float(amount_str)
+            except ValueError:
+                await event.respond("❌ Invalid amount.")
+                return
+        else:
+            await event.respond("❌ Invalid currency. Only INR and USD are supported.")
+            return
 
     if username == "all":
         cursor.execute("SELECT username FROM users")
@@ -470,6 +673,54 @@ async def extend_plan(event):
         await event.respond(response)
     else:
         await extend_plan_helper(event, username, additional_seconds)
+
+    if amount_inr is not None:
+        payment_date = int(time.time())
+        cursor.execute(
+            """
+        INSERT INTO payments (user_id, amount, currency, payment_date)
+        VALUES ((SELECT user_id FROM users WHERE username=?), ?, ?, ?)
+        """,
+            (username, amount_inr, "INR", payment_date),
+        )
+        conn.commit()
+        await event.respond(
+            f"✅ Amount `{amount_inr:.2f} INR` credited to user `{username}`."
+        )
+
+
+# Command to show payment history for a user
+@client.on(events.NewMessage(pattern="/payment_history"))
+async def payment_history(event):
+    if not is_authorized_user(event.sender_id):
+        await event.respond("❌ You are not authorized to use this command.")
+        return
+
+    if len(event.message.text.split()) < 2:
+        await event.respond("❓ Usage: /payment_history <username>")
+        return
+
+    username = event.message.text.split()[1]
+    cursor.execute(
+        """
+        SELECT amount, currency, payment_date
+        FROM payments
+        WHERE user_id = (SELECT user_id FROM users WHERE username = ?)
+        ORDER BY payment_date DESC
+        """,
+        (username,),
+    )
+    payments = cursor.fetchall()
+
+    if payments:
+        response = f"💳 Payment History for `{username}`:\n\n"
+        for amount, currency, payment_date in payments:
+            payment_date_str = get_date_str(payment_date)
+            response += f"💰 Amount: `{amount:.2f} {currency}`\n📅 Date: `{payment_date_str}`\n\n"
+    else:
+        response = f"🔍 No payment history found for `{username}`."
+
+    await event.respond(response)
 
 
 # Helper function to extend a user's plan
