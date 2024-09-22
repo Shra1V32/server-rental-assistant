@@ -1,5 +1,4 @@
 import asyncio
-import os
 import random
 import re
 import sqlite3
@@ -339,7 +338,7 @@ async def create_user(event):
         f"🔗 **SSH Command:**\n"
         f"`{ssh_command}`\n"
         f"\n"
-        f"🔑 **Password:** Please click the button below to get your password.\n"
+        f"🔑 **Password:** Please click the button below to get your password.\n\n"
     )
 
     if BE_NOTED_TEXT:
@@ -519,13 +518,20 @@ async def list_users(event):
         return
 
     cursor.execute(
-        "SELECT username, tg_user_id, tg_first_name, expiry_time, is_expired FROM users"
+        "SELECT username, tg_user_id, tg_first_name, tg_last_name, expiry_time, is_expired FROM users"
     )
     users = cursor.fetchall()
 
     if users:
         response = f"👥 Total Users: {len(users)}\n\n"
-        for username, tg_user_id, tg_user_first_name, expiry_time, is_expired in users:
+        for (
+            username,
+            tg_user_id,
+            tg_user_first_name,
+            tg_user_last_name,
+            expiry_time,
+            is_expired,
+        ) in users:
             ist = pytz.timezone(TIME_ZONE)
             expiry_date_ist = datetime.fromtimestamp(expiry_time, ist)
             expiry_date_str = get_date_str(expiry_time)
@@ -540,9 +546,19 @@ async def list_users(event):
                 remaining_time_str += f"{remaining_time.seconds // 3600} hours, "
                 remaining_time_str += f"{(remaining_time.seconds // 60) % 60} minutes"
 
+                tg_user_id = str(tg_user_id)
+
+                # Make the user clickable if the user is set
+                if tg_user_id and tg_user_first_name and tg_user_last_name:
+                    tg_tag = f"[{tg_user_first_name} {tg_user_last_name}](tg://user?id={tg_user_id})"
+                elif tg_user_id and tg_user_first_name:
+                    tg_tag = f"[{tg_user_first_name}](tg://user?id={tg_user_id})"
+                else:
+                    tg_tag = tg_user_first_name if tg_user_first_name else "Not set"
+
                 response += (
                     f"✨ Username: `{username}`\n"
-                    f"   Telegram: [{tg_user_first_name}](tg://user?id={tg_user_id})\n"
+                    f"   Telegram: {tg_tag}\n"
                     f"   Expiry Date: `{expiry_date_str}`\n"
                     f"   Remaining Time: `{remaining_time_str}`\n"
                     f"   Status: `Active`\n\n"
@@ -567,6 +583,29 @@ async def list_users(event):
         response = "🔍 No users found."
 
     await event.respond(response)
+
+
+# Clear the tg username and tg user id for a user
+@client.on(events.NewMessage(pattern="/clear_user"))
+async def clear_user(event):
+    if not is_authorized_user(event.sender_id):
+        await event.respond("❌ You are not authorized to use this command.")
+        return
+
+    if len(event.message.text.split()) < 2:
+        await event.respond("❓ Usage: /clear_user <username>")
+        return
+
+    username = event.message.text.split()[1]
+    cursor.execute(
+        "UPDATE users SET tg_username=NULL, tg_user_id=NULL WHERE username=?",
+        (username,),
+    )
+    conn.commit()
+
+    await event.respond(
+        f"✅ Cleared Telegram username and user id for user `{username}`."
+    )
 
 
 # List the currently using/ connected users
@@ -705,7 +744,10 @@ async def notify_expiry():
             remaining_time_str += f"{remaining_time.seconds // 3600} hours, "
             remaining_time_str += f"{(remaining_time.seconds // 60) % 60} minutes"
 
-            message = f"⏰ [{user_first_name}](tg://user?id={user_id}) Plan for user `{username}` will expire in {remaining_time_str}."
+            if tg_username:
+                message = f"⏰ [{user_first_name}](tg://user?id={user_id}) Plan for user `{username}` will expire in {remaining_time_str}."
+            else:
+                message = f"⏰ Plan for user `{username}` will expire in {remaining_time_str}."
             message += "\n\nPlease contact the admin if you want to extend the plan. 🔄"
             message += "\nYour data will be deleted after the expiry time. 🗑️"
             if not GROUP_ID:
@@ -740,10 +782,16 @@ async def notify_expiry():
 
             # Send expired message in the group
             if GROUP_ID:
-                await client.send_message(
-                    GROUP_ID,
-                    f"❌ @{tg_username} Your plan for the user: `{username}` has been expired.",
-                )
+                if tg_username:
+                    await client.send_message(
+                        GROUP_ID,
+                        f"❌ @{tg_username} Your plan for the user: `{username}` has been expired.",
+                    )
+                else:
+                    await client.send_message(
+                        GROUP_ID,
+                        f"❌ Plan for user `{username}` has been expired.",
+                    )
 
             # Send action notification to the admin
             await client.send_message(
