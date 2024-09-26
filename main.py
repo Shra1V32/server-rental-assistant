@@ -424,10 +424,6 @@ async def create_user(event):
     user_uuid = str(uuid.uuid4())
     password_url = f"https://t.me/{BOT_USERNAME.username}?start={user_uuid}"
 
-    amount_inr = await process_payment(event, username, amount_str, currency)
-    if amount_inr is None:
-        return  # Error occurred during processing
-
     payment_date = int(time.time())
 
     cursor.execute(
@@ -443,6 +439,10 @@ async def create_user(event):
         message_str,
         buttons=[[Button.url("Get Password", password_url)]],
     )
+
+    amount_inr = await process_payment(event, username, amount_str, currency)
+    if amount_inr is None:
+        return  # Error occurred during processing
 
     message_str = (
         f"🔐 **Username:** `{username}`\n"
