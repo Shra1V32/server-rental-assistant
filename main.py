@@ -866,50 +866,45 @@ async def notify_expiry():
             remaining_time_str += f"{(remaining_time.seconds // 60) % 60} minutes"
 
             if tg_username:
-                message = f"⏰ [{user_first_name}](tg://user?id={user_id}) Plan for user `{username}` will expire in {remaining_time_str}."
+                message = f"⏰ [{user_first_name}](tg://user?id={user_id}) Your plan for user `{username}` will expire in {remaining_time_str}."
             else:
                 message = f"⏰ Plan for user `{username}` will expire in {remaining_time_str}."
             message += "\n\nPlease contact the admin if you want to extend the plan. 🔄"
             message += "\nYour data will be deleted after the expiry time. 🗑️"
 
-            if not GROUP_ID:
-                print(
-                    "Warning: GROUP_ID is not set in .env file. Skipping group notification."
-                )
-                await client.send_message(ADMIN_ID, message)
+            if user_id:
+                # Send the message to that user_id in DM
+                await client.send_message(user_id, message)
             else:
-                try:
-                    await client.send_message(GROUP_ID, message)
-                except Exception as e:
-                    await client.send_message(
-                        ADMIN_ID, f"❌ Error sending message: {e}"
-                    )
-                    await client.send_message(ADMIN_ID, message)
+                await client.send_message(ADMIN_ID, message)
+
+            # alert the admin that the user is expiring soon
+            message = (
+                f"⏰ Plan for user `{username}` will expire in {remaining_time_str}."
+            )
+            await client.send_message(ADMIN_ID, message)
         # Check expired users and notify admin to take necessary action
         cursor.execute(
-            "SELECT tg_username, username FROM users WHERE expiry_time<=? AND is_expired=false",
+            "SELECT tg_user_id, tg_username, username FROM users WHERE expiry_time<=? AND is_expired=false",
             (now,),
         )
         expired_users = cursor.fetchall()
 
-        for tg_username, username in expired_users:
+        for tg_user_id, tg_username, username in expired_users:
             cursor.execute(
                 "UPDATE users SET is_expired=true WHERE username=?", (username,)
             )
             conn.commit()
 
-            # Send expired message in the group
-            if GROUP_ID:
-                if tg_username:
-                    await client.send_message(
-                        GROUP_ID,
-                        f"❌ @{tg_username} Your plan for the user: `{username}` has been expired.",
-                    )
-                else:
-                    await client.send_message(
-                        GROUP_ID,
-                        f"❌ Plan for user `{username}` has been expired.",
-                    )
+            message = f"❌ Your plan for the user: `{username}` has been expired."
+            message += "\n\nThanks for using our service. 🙏"
+            message += "\nFeel free to contact the admin for any queries. 📞"
+
+            # Send the message to the user in DM
+            await client.send_message(
+                tg_user_id,
+                message,
+            )
 
             # Send action notification to the admin
             await client.send_message(
