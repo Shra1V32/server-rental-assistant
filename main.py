@@ -920,7 +920,7 @@ async def notify_expiry():
 
 
 # --- Callback Query Handlers ---
-@client.on(events.CallbackQuery(re.compile(r"cancel")))
+@client.on(events.CallbackQuery(pattern=re.compile(r"cancel")))
 async def handle_cancel(event):
     username = event.data.decode().split()[1]
     prev_msg = (
@@ -932,17 +932,13 @@ async def handle_cancel(event):
     await event.edit(prev_msg + "\n\n" + "🚫 Action canceled.")
 
 
-@client.on(events.CallbackQuery(re.compile(r"delete_user")))
+@client.on(events.CallbackQuery(pattern=re.compile(r"delete_user")))
 async def handle_delete_user(event):
     username = event.data.decode().split()[1]
-    prev_msg = (
-        f"⚠️ Plan for user `{username}` has expired. Please take necessary action."
-    )
-
     await delete_system_user(username, event)
 
 
-@client.on(events.CallbackQuery(re.compile(r"clean_db")))
+@client.on(events.CallbackQuery(pattern=re.compile(r"clean_db")))
 async def handle_clean_db(event):
     username = event.data.decode().split()[1]
     cursor.execute("DELETE FROM users WHERE username=?", (username,))
