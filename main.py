@@ -813,17 +813,23 @@ async def start_command(event):
         )
         conn.commit()
 
+        # Tag the user for future refs
+        msg = f"[{user_first_name}](tg://user?id={user_id})\n\n"
+
         await event.respond(
-            f"🔑 **Username:** `{username}`\n🔒 **Password:** `{password}`"
+            msg + f"🔑 **Username:** `{username}`\n🔒 **Password:** `{password}`"
         )
         await client.send_message(
             ADMIN_ID,
             f"🔑 Password sent to user [{user_first_name}](tg://user?id={user_id}).",
         )
     else:
+        # Tag the user for future refs
+        msg = f"[{user_first_name}](tg://user?id={user_id})\n\n"
+        
         if user_id == tg_user_id:
             await event.respond(
-                f"🔑 **Username:** `{username}`\n🔒 **Password:** `{password}`"
+                msg + f"🔑 **Username:** `{username}`\n🔒 **Password:** `{password}`"
             )
         else:
             await event.respond(
