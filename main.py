@@ -718,6 +718,27 @@ async def list_users(event):
 
     await event.respond(response)
 
+# /broadcast command
+@client.on(events.NewMessage(pattern="/broadcast"))
+@authorized_user
+async def broadcast(event):
+    
+        if len(event.message.text.split()) < 2:
+            await event.respond("❓ Usage: /broadcast <message>")
+            return
+    
+        message = event.message.text.split(" ", 1)[1]
+    
+        cursor.execute("SELECT tg_user_id FROM users")
+        users = cursor.fetchall()
+    
+        for user_id in users:
+            try:
+                await client.send_message(user_id[0], message)
+            except:
+                pass
+    
+        await event.respond(f"✅ Broadcasted message to {len(users)} users.")
 
 # /clear_user command
 @client.on(events.NewMessage(pattern="/clear_user"))
