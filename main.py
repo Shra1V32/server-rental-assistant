@@ -763,6 +763,39 @@ async def clear_user(event):
     )
 
 
+# Link a Telegram user to a system user
+# Create a button to link the user
+# the user clicks the button and the bot sends the user's Telegram ID to the server
+@client.on(events.NewMessage(pattern="/link_user"))
+@authorized_user
+async def link_user(event):
+
+    if len(event.message.text.split()) < 2:
+        await event.respond("❓ Usage: /link_user <username>")
+        return
+
+    username = event.message.text.split()[1]
+
+    cursor.execute("SELECT tg_user_id FROM users WHERE username=?", (username,))
+    result = cursor.fetchone()
+
+    if not result:
+        await event.respond(f"❌ User `{username}` not found.")
+        return
+
+    user_id = result[0]
+    if user_id:
+        await event.respond(
+            f"❌ User `{username}` is already linked to a Telegram user."
+        )
+        return
+
+    await event.respond(
+        f"🔗 Click the button below to link the Telegram user to the system user `{username}`.",
+        buttons=[Button.inline("Link", data=f"tglink {username}")],
+    )
+
+
 # /who command
 @client.on(events.NewMessage(pattern="/who"))
 @authorized_user
@@ -849,7 +882,7 @@ async def start_command(event):
     else:
         # Tag the user for future refs
         msg = f"[{user_first_name}](tg://user?id={user_id})\n\n"
-        
+
         if user_id == tg_user_id:
             await event.respond(
                 msg + f"🔑 **Username:** `{username}`\n🔒 **Password:** `{password}`"
@@ -973,6 +1006,31 @@ async def handle_clean_db(event):
     cursor.execute("DELETE FROM users WHERE username=?", (username,))
     conn.commit()
     await event.edit(f"✅ User `{username}` deleted from the database.")
+
+
+@client.on(events.CallbackQuery(pattern=re.compile(r"tglink")))
+async def handle_tglink(event):
+    username = event.data.decode().split()[1]
+
+    # Get the user_id from the event
+    user_id = event.sender_id
+    user_first_name = event.sender.first_name
+    user_last_name = event.sender.last_name
+    tg_username = event.sender.username
+
+    # Update the user's Telegram ID in the database
+    cursor.execute(
+        "UPDATE users SET tg_user_id=?, tg_first_name=?, tg_last_name=? WHERE username=?",
+        (user_id, user_first_name, user_last_name, username),
+    )
+
+    conn.commit()
+
+    # Tag the user for future refs
+    msg = f"[{user_first_name}](tg://user?id={user_id})\n\n"
+    await event.edit(
+        msg + f"✅ User `{username}` linked to Telegram user `{tg_username}`."
+    )
 
 
 # --- Main Execution ---
