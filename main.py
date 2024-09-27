@@ -730,7 +730,7 @@ async def clear_user(event):
 
     username = event.message.text.split()[1]
     cursor.execute(
-        "UPDATE users SET tg_username=NULL, tg_user_id=NULL WHERE username=?",
+        "UPDATE users SET tg_username=NULL, tg_user_id=NULL, tg_first_name=NULL, tg_last_name=NULL WHERE username=?",
         (username,),
     )
     conn.commit()
