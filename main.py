@@ -510,9 +510,11 @@ async def help_command(event):
     - `/delete_user <username>`: Delete a user.
     - `/extend_plan <username> <additional_duration> [amount] [currency]`: Extend a user's plan.
     - `/payment_history <username>`: Show the payment history for a user.
-    - `/clear_user <username>`: Clear the Telegram username and user id for a user.
+    - `/unlink_user <username>`: Clear the Telegram username and user id for a user.
     - `/list_users`: List all users along with their expiry dates and remaining time.
     - `/who`: List the currently connected users.
+    - `/broadcast <message>`: Broadcast a message to all users.
+    - `/link_user <username>`: Link a Telegram user to a system user.
     """
 
     await event.respond(help_text)
@@ -743,12 +745,12 @@ async def broadcast(event):
 
 
 # /clear_user command
-@client.on(events.NewMessage(pattern="/clear_user"))
+@client.on(events.NewMessage(pattern="/unlink_user"))
 @authorized_user
 async def clear_user(event):
 
     if len(event.message.text.split()) < 2:
-        await event.respond("❓ Usage: /clear_user <username>")
+        await event.respond("❓ Usage: /unlink_user <username>")
         return
 
     username = event.message.text.split()[1]
