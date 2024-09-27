@@ -776,6 +776,8 @@ async def link_user(event):
         await event.respond("❓ Usage: /link_user <username>")
         return
 
+    BOT_USERNAME = await client.get_me()
+
     username = event.message.text.split()[1]
 
     cursor.execute("SELECT tg_user_id FROM users WHERE username=?", (username,))
@@ -792,9 +794,27 @@ async def link_user(event):
         )
         return
 
+    # Get uuid for the user
+    cursor.execute("SELECT uuid FROM users WHERE username=?", (username,))
+    result = cursor.fetchone()
+
+    unique_id = result[0]
+
+    if not unique_id:
+        await event.respond(
+            f"❌ User `{username}` doesn't have a valid UUID, randomizing..."
+        )
+        unique_id = str(uuid.uuid4())
+        cursor.execute("UPDATE users SET uuid=? WHERE username=?", (unique_id, username))
+        conn.commit()
+
     await event.respond(
         f"🔗 Click the button below to link the Telegram user to the system user `{username}`.",
-        buttons=[Button.inline("Link", data=f"tglink {username}")],
+        buttons=[
+            Button.url(
+                "Link User", f"https://t.me/{BOT_USERNAME.username}?start={unique_id}"
+            )
+        ],
     )
 
 
