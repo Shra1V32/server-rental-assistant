@@ -235,6 +235,25 @@ async def extend_plan_helper(
     )
     conn.commit()
 
+    # Send notification to the user
+    if send_notification:
+        cursor.execute(
+            "SELECT tg_user_id, tg_first_name, expiry_time FROM users WHERE username=?",
+            (username,),
+        )
+        result = cursor.fetchone()
+        if result:
+            user_id, user_first_name, expiry_time = result
+            remaining_time_str = parse_duration_to_human_readable(additional_seconds)
+            expiry_date_str = get_date_str(expiry_time)
+            message = (
+                f"Dear {user_first_name},\n\n"
+                f"🔥 Your plan has been extended by `{remaining_time_str}`.\n"
+                f"📅 New expiry date: `{expiry_date_str}`"
+                f"\n\n Enjoy your server! 🚀"
+            )
+            await client.send_message(user_id, message)
+
 
 async def reduce_plan_helper(
     event, username, reduced_duration_seconds, send_notification=True
