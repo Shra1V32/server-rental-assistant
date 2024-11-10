@@ -10,7 +10,10 @@ from datetime import datetime
 
 import aiohttp
 import pytz
+from fpdf import FPDF
+from tabulate import tabulate
 from telethon import Button, TelegramClient, events
+from weasyprint import HTML
 
 from constants import (
     ADJECTIVES,
@@ -38,6 +41,7 @@ def create_table(table_name, schema):
     conn.commit()
 
 
+# Table for active subscription users
 create_table(
     "users",
     """
@@ -48,6 +52,8 @@ create_table(
     creation_time INTEGER DEFAULT (cast(strftime('%s', 'now') as int)),
     expiry_time INTEGER NOT NULL,
     is_expired BOOLEAN DEFAULT False,
+    is_active BOOLEAN DEFAULT True,
+    plan_duration_sec INTEGER GENERATED ALWAYS AS (expiry_time - creation_time) VIRTUAL,
     tg_username TEXT DEFAULT NULL,
     tg_first_name TEXT DEFAULT NULL,
     tg_last_name TEXT DEFAULT NULL,
@@ -170,6 +176,24 @@ def create_system_user(username, password):
         check=True,
     )
     print(f"System user {username} created successfully.")
+
+
+async def change_password(username):
+    """
+    Change the password of a system user
+    """
+    password = generate_password()
+    hashed_password = subprocess.run(
+        ["openssl", "passwd", "-6", password],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["sudo", "usermod", "-p", hashed_password, username],
+        check=True,
+    )
+    return password
 
 
 async def delete_system_user(username, event):
@@ -340,9 +364,11 @@ async def reduce_plan(event):
     reduced_duration_seconds = parse_duration(reduced_duration_str)
 
     if username == "all":
-        cursor.execute("SELECT username FROM users")
+        cursor.execute("SELECT username, is_expired FROM users")
         usernames = cursor.fetchall()
         for row in usernames:
+            if row[1]:
+                continue
             await reduce_plan_helper(
                 event, row[0], reduced_duration_seconds, send_notification=False
             )
@@ -610,9 +636,11 @@ async def extend_plan(event):
             return
 
     if username == "all":
-        cursor.execute("SELECT username FROM users")
+        cursor.execute("SELECT username, is_active FROM users")
         usernames = cursor.fetchall()
         for row in usernames:
+            if not row[1]:
+                continue
             await extend_plan_helper(
                 event, row[0], additional_seconds, send_notification=False
             )
@@ -668,13 +696,161 @@ async def payment_history(event):
     await event.respond(response)
 
 
+# Function to generate the PDF report
+async def generate_report(event):
+    rows = cursor.execute(
+        """
+        SELECT
+            u.user_id,
+            u.username,
+            u.creation_time,
+            u.expiry_time,
+            u.is_expired,
+            SUM(p.amount) AS total_payment,
+            p.currency,
+            COUNT(p.payment_id) AS payment_count
+        FROM users u
+        LEFT JOIN payments p ON u.user_id = p.user_id
+        GROUP BY u.user_id
+        """
+    ).fetchall()
+
+    html_content = """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>User Payments Report</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                background-color: #f4f4f4;
+            }
+            .container {
+                width: 80%;
+                margin: 0 auto;
+                padding: 20px;
+                background-color: #fff;
+                box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            }
+            h1 {
+                text-align: center;
+                color: #333;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 20px;
+            }
+            th, td {
+                padding: 10px;
+                border: 1px solid #ddd;
+                text-align: left;
+            }
+            th {
+                background-color: #4CAF50;
+                color: white;
+            }
+            tr:nth-child(even) {
+                background-color: #f2f2f2;
+            }
+            tr:nth-child(odd) {
+                background-color: #e6f7ff;
+            }
+            tr:hover {
+                background-color: #ddd;
+            }
+            .expired {
+                color: red;
+            }
+            .active {
+                color: green;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>User Payments Report</h1>
+            <table>
+                <thead>
+                    <tr>
+                        <th>User ID</th>
+                        <th>Username</th>
+                        <th>Creation Time (IST)</th>
+                        <th>Expiry Time (IST)</th>
+                        <th>Status</th>
+                        <th>Total Payments</th>
+                        <th>Total Earnings</th>
+                    </tr>
+                </thead>
+                <tbody>
+    """
+
+    for row in rows:
+        (
+            user_id,
+            username,
+            creation_time,
+            expiry_time,
+            is_expired,
+            total_payment,
+            currency,
+            payment_count,
+        ) = row
+        status = "Expired" if is_expired else "Active"
+
+        # Convert timestamps to IST
+        creation_ist = get_date_str(creation_time)
+        expiry_ist = get_date_str(expiry_time)
+
+        total_payment = total_payment if total_payment is not None else 0.00
+
+        html_content += f"""
+                    <tr>
+                        <td>{user_id}</td>
+                        <td>{username}</td>
+                        <td>{creation_ist}</td>
+                        <td>{expiry_ist}</td>
+                        <td>{status}</td>
+                        <td>{payment_count}</td>
+                        <td>{total_payment:.2f} {currency if currency else ''}</td>
+                    </tr>
+        """
+
+    html_content += """
+                </tbody>
+            </table>
+        </div>
+    </body>
+    </html>
+    """
+
+    # Generate PDF from HTML content
+    pdf_file_path = "user_payments_report.pdf"
+    HTML(string=html_content).write_pdf(pdf_file_path)
+
+    # Send the generated PDF as a message
+    await client.send_file(event.chat_id, pdf_file_path)
+
+
+# /generate_report command
+@client.on(events.NewMessage(pattern="/gen_report"))
+@authorized_user
+async def generate_report_command(event):
+    await client.send_message(event.chat_id, "📄 Generating report...")
+    await generate_report(event)
+
+
 # /list_users command
 @client.on(events.NewMessage(pattern="/list_users"))
 @authorized_user
 async def list_users(event):
 
     cursor.execute(
-        "SELECT username, tg_user_id, tg_first_name, tg_last_name, expiry_time, is_expired FROM users"
+        "SELECT username, tg_user_id, tg_first_name, tg_last_name, expiry_time, plan_duration_sec, is_expired, is_active FROM users"
     )
     users = cursor.fetchall()
 
@@ -682,7 +858,10 @@ async def list_users(event):
         await event.respond("🔍 No users found.")
         return
 
-    response = f"👥 Total Users: {len(users)}\n\n"
+    # Get the number of active users
+    active_users = [user for user in users if user[6]]
+
+    response = f"👥 Total Users: {len(active_users)}\n\n"
     ist = pytz.timezone(TIME_ZONE)
 
     for (
@@ -691,11 +870,18 @@ async def list_users(event):
         tg_user_first_name,
         tg_user_last_name,
         expiry_time,
+        plan_duration_sec,
         is_expired,
+        is_active,
     ) in users:
         expiry_date_ist = datetime.fromtimestamp(expiry_time, ist)
         expiry_date_str = get_date_str(expiry_time)
 
+        if not is_active:
+            # Active users means the user is not deleted from the system
+            # Inactive users are the ones whose expiry date has passed
+            # and they deleted from the system
+            continue
         if not is_expired:
             remaining_time = expiry_date_ist - datetime.now(pytz.utc).astimezone(ist)
             remaining_time_str = ""
@@ -716,6 +902,7 @@ async def list_users(event):
             response += (
                 f"✨ Username: `{username}`\n"
                 f"   Telegram: {tg_tag}\n"
+                f"   Plan: {parse_duration_to_human_readable(plan_duration_sec)}\n"
                 f"   Expiry Date: `{expiry_date_str}`\n"
                 f"   Remaining Time: `{remaining_time_str}`\n"
                 f"   Status: `Active`\n\n"
@@ -751,7 +938,9 @@ async def broadcast(event):
 
     message = event.message.text.split(" ", 1)[1]
 
-    cursor.execute("SELECT tg_user_id FROM users")
+    cursor.execute(
+        "SELECT tg_user_id FROM users WHERE (tg_user_id IS NOT NULL) AND (is_active = 1)"
+    )
     users = cursor.fetchall()
 
     for user_id in users:
@@ -824,7 +1013,9 @@ async def link_user(event):
             f"❌ User `{username}` doesn't have a valid UUID, randomizing..."
         )
         unique_id = str(uuid.uuid4())
-        cursor.execute("UPDATE users SET uuid=? WHERE username=?", (unique_id, username))
+        cursor.execute(
+            "UPDATE users SET uuid=? WHERE username=?", (unique_id, username)
+        )
         conn.commit()
 
     await event.respond(
@@ -1044,9 +1235,15 @@ async def handle_delete_user(event):
 @client.on(events.CallbackQuery(pattern=re.compile(r"clean_db")))
 async def handle_clean_db(event):
     username = event.data.decode().split()[1]
-    cursor.execute("DELETE FROM users WHERE username=?", (username,))
+    # cursor.execute("DELETE FROM users WHERE username=?", (username,))
+    cursor.execute("UPDATE users SET is_active=false WHERE username=?", (username,))
     conn.commit()
-    await event.edit(f"✅ User `{username}` deleted from the database.")
+    cursor.execute("SELECT is_expired FROM users WHERE username=?", (username,))
+    is_expired = cursor.fetchone()[0]
+    status = "Expired" if is_expired else "Active"
+    await event.edit(
+        f"✅ User `{username}` plan updated in the database. Status: `{status}`."
+    )
 
 
 @client.on(events.CallbackQuery(pattern=re.compile(r"tglink")))
