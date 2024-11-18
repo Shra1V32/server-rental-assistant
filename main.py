@@ -47,18 +47,47 @@ create_table(
     """
     user_id INTEGER PRIMARY KEY AUTOINCREMENT,
     uuid TEXT UNIQUE DEFAULT NULL,
-    username TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    creation_time INTEGER DEFAULT (cast(strftime('%s', 'now') as int)),
-    expiry_time INTEGER NOT NULL,
-    is_expired BOOLEAN DEFAULT False,
-    is_active BOOLEAN DEFAULT True,
-    plan_duration_sec INTEGER GENERATED ALWAYS AS (expiry_time - creation_time) VIRTUAL,
+    linux_username TEXT UNIQUE NOT NULL,
+    creation_time INTEGER DEFAULT (strftime('%s', 'now'))
+    """,
+)
+
+create_table(
+    "telegram_users",
+    """
+    user_id INTEGER NOT NULL,
+    tg_user_id INTEGER PRIMARY KEY,
+    linux_username TEXT NOT NULL,
     tg_username TEXT DEFAULT NULL,
     tg_first_name TEXT DEFAULT NULL,
     tg_last_name TEXT DEFAULT NULL,
-    tg_user_id INTEGER DEFAULT NULL,
-    sent_expiry_notification BOOLEAN DEFAULT False
+    FOREIGN KEY (user_id) REFERENCES users(user_id),
+    FOREIGN KEY (linux_username) REFERENCES users(linux_username)
+    """,
+)
+
+# Table for server rental plan details
+create_table(
+    "rentals",
+    """
+    rental_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL, -- user_id from users table,
+    telegram_id INTEGER DEFAULT NULL, -- telegram_id from telegram_users table,
+    tg_first_name TEXT DEFAULT NULL,
+    linux_username TEXT NOT NULL,
+    linux_password TEXT NOT NULL,
+    start_time INTEGER NOT NULL,  -- in seconds
+    end_time INTEGER NOT NULL, -- in seconds
+    plan_duration INTEGER NOT NULL, -- in seconds
+    amount REAL NOT NULL, -- in INR, USD
+    currency TEXT NOT NULL, -- INR, USD
+    is_expired BOOLEAN DEFAULT False,
+    is_active BOOLEAN DEFAULT True,
+    sent_expiry_notification BOOLEAN DEFAULT False,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON UPDATE CASCADE,
+    FOREIGN KEY (linux_username) REFERENCES users(username) ON UPDATE CASCADE,
+    FOREIGN KEY (telegram_id) REFERENCES telegram_users(tg_user_id) ON UPDATE CASCADE,
+    FOREIGN KEY (tg_first_name) REFERENCES telegram_users(tg_first_name) ON UPDATE CASCADE
     """,
 )
 
@@ -204,7 +233,12 @@ async def delete_system_user(username, event):
     except subprocess.CalledProcessError as e:
         await event.edit(f"❌ Error deleting user `{username}`: {e}")
         return
-    cursor.execute("DELETE FROM users WHERE username=?", (username,))
+
+    # Set the is_active to False for the user
+    cursor.execute(
+        "UPDATE rentals SET is_active = 0 WHERE linux_username = ?",
+        (username,),
+    )
     conn.commit()
     await event.respond(f"✅ User `{username}` deleted.")
 
@@ -213,7 +247,7 @@ async def delete_system_user(username, event):
 async def modify_plan_duration(
     event, username, duration_change_seconds, action="reduced"
 ):
-    cursor.execute("SELECT expiry_time FROM users WHERE username=?", (username,))
+    cursor.execute("SELECT end_time FROM rentals WHERE linux_username=?", (username,))
     result = cursor.fetchone()
 
     if not result:
@@ -230,7 +264,8 @@ async def modify_plan_duration(
         return
 
     cursor.execute(
-        "UPDATE users SET expiry_time=? WHERE username=?", (new_expiry_time, username)
+        "UPDATE rentals SET end_time=? WHERE linux_username=?",
+        (new_expiry_time, username),
     )
     conn.commit()
 
@@ -250,10 +285,10 @@ async def extend_plan_helper(
     await modify_plan_duration(event, username, additional_seconds, action="extended")
     cursor.execute(
         """
-        UPDATE users
+        UPDATE rentals
         SET sent_expiry_notification = false, 
             is_expired = false 
-        WHERE username = ?;
+        WHERE linux_username = ?;
         """,
         (username,),
     )
@@ -262,7 +297,7 @@ async def extend_plan_helper(
     # Send notification to the user
     if send_notification:
         cursor.execute(
-            "SELECT tg_user_id, tg_first_name, expiry_time FROM users WHERE username=?",
+            "SELECT tg_user_id, tg_first_name, end_time FROM rentals WHERE linux_username=?",
             (username,),
         )
         result = cursor.fetchone()
@@ -312,7 +347,7 @@ async def process_payment(event, username, amount_str, currency):
     cursor.execute(
         """
     INSERT INTO payments (user_id, amount, currency, payment_date)
-    VALUES ((SELECT user_id FROM users WHERE username=?), ?, ?, ?)
+    VALUES ((SELECT user_id FROM users WHERE linux_username=?), ?, ?, ?)
     """,
         (username, amount_inr, "INR", payment_date),
     )
@@ -364,7 +399,7 @@ async def reduce_plan(event):
     reduced_duration_seconds = parse_duration(reduced_duration_str)
 
     if username == "all":
-        cursor.execute("SELECT username, is_expired FROM users")
+        cursor.execute("SELECT linux_username, is_expired FROM rentals")
         usernames = cursor.fetchall()
         for row in usernames:
             if row[1]:
@@ -373,7 +408,7 @@ async def reduce_plan(event):
                 event, row[0], reduced_duration_seconds, send_notification=False
             )
 
-        cursor.execute("SELECT username, expiry_time FROM users")
+        cursor.execute("SELECT linux_username, end_time FROM rentals")
         users = cursor.fetchall()
         response = "🔄 All users' plans reduced!\n\n"
         response += "\n".join(
@@ -392,7 +427,7 @@ async def reduce_plan(event):
 @authorized_user
 async def sync_db(event):
 
-    cursor.execute("SELECT username, password, expiry_time FROM users")
+    cursor.execute("SELECT linux_username, linux_password, end_time FROM rentals")
     users = cursor.fetchall()
 
     for username, password, expiry_time in users:
@@ -473,10 +508,28 @@ async def create_user(event):
 
     cursor.execute(
         """
-    INSERT INTO users (uuid, username, password, expiry_time)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO users (uuid, linux_username)
+    VALUES (?, ?)
+    ON CONFLICT(linux_username) DO UPDATE SET uuid=excluded.uuid;
     """,
-        (user_uuid, username, password, expiry_time),
+        (user_uuid, username),
+    )
+
+    cursor.execute(
+        """
+    INSERT INTO rentals (user_id, linux_username, linux_password, start_time, end_time, plan_duration, amount, currency)
+    VALUES ((SELECT user_id FROM users WHERE linux_username=?), ?, ?, ?, ?, ?, ?, ?);
+    """,
+        (
+            username,
+            username,
+            password,
+            int(time.time()),
+            expiry_time,
+            plan_duration_seconds,
+            amount_str,
+            currency,
+        ),
     )
 
     await client.send_message(
@@ -586,7 +639,9 @@ async def delete_user_command(event):
         return
 
     username = event.message.text.split()[1]
-    cursor.execute("SELECT username FROM users WHERE username=?", (username,))
+    cursor.execute(
+        "SELECT linux_username FROM users WHERE linux_username=?", (username,)
+    )
     result = cursor.fetchone()
 
     user_exists = is_user_exists(username)
@@ -636,7 +691,7 @@ async def extend_plan(event):
             return
 
     if username == "all":
-        cursor.execute("SELECT username, is_active FROM users")
+        cursor.execute("SELECT linux_username, is_active FROM rentals")
         usernames = cursor.fetchall()
         for row in usernames:
             if not row[1]:
@@ -645,7 +700,7 @@ async def extend_plan(event):
                 event, row[0], additional_seconds, send_notification=False
             )
 
-        cursor.execute("SELECT username, expiry_time FROM users")
+        cursor.execute("SELECT linux_username, end_time FROM rentals")
         users = cursor.fetchall()
         response = "🔄 All users' plans extended!\n\n"
         response += "\n".join(
@@ -850,7 +905,7 @@ async def generate_report_command(event):
 async def list_users(event):
 
     cursor.execute(
-        "SELECT username, tg_user_id, tg_first_name, tg_last_name, expiry_time, plan_duration_sec, is_expired, is_active FROM users"
+        "SELECT linux_username, telegram_id, tg_first_name, end_time, plan_duration, is_expired, is_active FROM rentals"
     )
     users = cursor.fetchall()
 
@@ -868,7 +923,6 @@ async def list_users(event):
         username,
         tg_user_id,
         tg_user_first_name,
-        tg_user_last_name,
         expiry_time,
         plan_duration_sec,
         is_expired,
@@ -892,9 +946,7 @@ async def list_users(event):
 
             tg_user_id = str(tg_user_id)
 
-            if tg_user_id and tg_user_first_name and tg_user_last_name:
-                tg_tag = f"[{tg_user_first_name} {tg_user_last_name}](tg://user?id={tg_user_id})"
-            elif tg_user_id and tg_user_first_name:
+            if tg_user_id and tg_user_first_name:
                 tg_tag = f"[{tg_user_first_name}](tg://user?id={tg_user_id})"
             else:
                 tg_tag = tg_user_first_name if tg_user_first_name else "Not set"
@@ -938,8 +990,11 @@ async def broadcast(event):
 
     message = event.message.text.split(" ", 1)[1]
 
+    # Prepend the message with the sender's name, along with the notice
+    message = f"📢 **Broadcast Message**\n\n{message}"
+
     cursor.execute(
-        "SELECT tg_user_id FROM users WHERE (tg_user_id IS NOT NULL) AND (is_active = 1)"
+        "SELECT telegram_id FROM rentals WHERE (telegram_id IS NOT NULL) AND (is_active = 1)"
     )
     users = cursor.fetchall()
 
@@ -949,7 +1004,7 @@ async def broadcast(event):
         except:
             pass
 
-    await event.respond(f"✅ Broadcasted message to {len(users)} users.")
+    await event.respond(f"✅ Broadcasted message to {len(users)} user(s).")
 
 
 # /clear_user command
@@ -963,7 +1018,7 @@ async def clear_user(event):
 
     username = event.message.text.split()[1]
     cursor.execute(
-        "UPDATE users SET tg_username=NULL, tg_user_id=NULL, tg_first_name=NULL, tg_last_name=NULL WHERE username=?",
+        "UPDATE telegram_users SET tg_username=NULL, tg_user_id=NULL, tg_first_name=NULL, tg_last_name=NULL WHERE linux_username=?",
         (username,),
     )
     conn.commit()
@@ -988,7 +1043,9 @@ async def link_user(event):
 
     username = event.message.text.split()[1]
 
-    cursor.execute("SELECT tg_user_id FROM users WHERE username=?", (username,))
+    cursor.execute(
+        "SELECT telegram_id FROM telegram_users WHERE linux_username=?", (username,)
+    )
     result = cursor.fetchone()
 
     if not result:
@@ -1014,7 +1071,7 @@ async def link_user(event):
         )
         unique_id = str(uuid.uuid4())
         cursor.execute(
-            "UPDATE users SET uuid=? WHERE username=?", (unique_id, username)
+            "UPDATE users SET uuid=? WHERE linux_username=?", (unique_id, username)
         )
         conn.commit()
 
@@ -1068,54 +1125,69 @@ async def start_command(event):
 
     user_uuid = event.message.text.split()[1]
 
-    cursor.execute(
-        "SELECT username, password, tg_user_id FROM users WHERE uuid=?",
-        (user_uuid,),
-    )
-
-    result = cursor.fetchone()
-    if not result:
+    # Does the uuid exist in the database?
+    cursor.execute("SELECT linux_username FROM users WHERE uuid=?", (user_uuid,))
+    username = cursor.fetchone()[0]
+    print("Username:", username)
+    if not username:
         await event.respond("❌ Invalid or expired link.")
         return
 
-    username, password, tg_user_id = result
+    password = cursor.execute(
+        "SELECT linux_password FROM rentals WHERE linux_username=?", (username,)
+    )
+    password = password.fetchone()[0]
 
-    user_id = event.sender_id
+    # Get the existing user_id for the user
+    cursor.execute(
+        "SELECT tg_user_id from telegram_users WHERE user_id = (SELECT user_id FROM users WHERE uuid=?)",
+        (user_uuid,),
+    )
+    result = cursor.fetchone()
+    fetched_user_id = result[0] if result else None
+
+    tg_user_id = event.sender_id
     new_tg_username = event.sender.username
     user_first_name = event.sender.first_name
-    user_last_name = event.sender.last_name
 
-    if tg_user_id is None:
+    if fetched_user_id is None:
         if new_tg_username is None:
-            new_tg_username = user_id
+            new_tg_username = tg_user_id
 
         cursor.execute(
-            "UPDATE users SET tg_username=?, tg_user_id=?, tg_first_name=?, tg_last_name=? WHERE username=?",
+            "INSERT OR IGNORE INTO telegram_users (user_id, tg_username, tg_user_id, tg_first_name, linux_username) VALUES ((SELECT user_id from users WHERE linux_username=?), ?, ?, ?, ?)",
             (
+                username,
                 new_tg_username,
-                user_id,
+                tg_user_id,
                 user_first_name,
-                user_last_name,
                 username,
             ),
         )
         conn.commit()
 
+        # Update users table as well
+        cursor.execute(
+            "UPDATE rentals SET telegram_id = ?, tg_first_name = ? WHERE linux_username = ?",
+            (tg_user_id, user_first_name, username),
+        )
+        conn.commit()
+
         # Tag the user for future refs
-        msg = f"[{user_first_name}](tg://user?id={user_id})\n\n"
+        msg = f"[{user_first_name}](tg://user?id={tg_user_id})\n\n"
 
         await event.respond(
             msg + f"🔑 **Username:** `{username}`\n🔒 **Password:** `{password}`"
         )
         await client.send_message(
             ADMIN_ID,
-            f"🔑 Password sent to user [{user_first_name}](tg://user?id={user_id}).",
+            f"🔑 Password sent to user [{user_first_name}](tg://user?id={tg_user_id}).",
         )
     else:
         # Tag the user for future refs
-        msg = f"[{user_first_name}](tg://user?id={user_id})\n\n"
+        msg = f"[{user_first_name}](tg://user?id={tg_user_id})\n\n"
 
-        if user_id == tg_user_id:
+        if fetched_user_id == tg_user_id:
             await event.respond(
                 msg + f"🔑 **Username:** `{username}`\n🔒 **Password:** `{password}`"
             )
@@ -1131,20 +1203,20 @@ async def notify_expiry():
         now = int(time.time())
         twelve_hours_from_now = now + (12 * 60 * 60)
         cursor.execute(
-            "SELECT tg_user_id, tg_first_name, username FROM users WHERE expiry_time<=? AND expiry_time>? AND sent_expiry_notification=false",
+            "SELECT telegram_id, tg_first_name, linux_username FROM rentals WHERE end_time<=? AND end_time>? AND sent_expiry_notification=false",
             (twelve_hours_from_now, now),
         )
         expiring_users = cursor.fetchall()
 
         for user_id, user_first_name, username in expiring_users:
             cursor.execute(
-                "UPDATE users SET sent_expiry_notification=true WHERE username=?",
+                "UPDATE rentals SET sent_expiry_notification=true WHERE linux_username=?",
                 (username,),
             )
             conn.commit()
 
             result = cursor.execute(
-                "SELECT expiry_time, tg_username FROM users WHERE username=?",
+                "SELECT end_time, telegram_id FROM rentals WHERE linux_username=?",
                 (username,),
             ).fetchone()
 
@@ -1179,20 +1251,22 @@ async def notify_expiry():
             await client.send_message(ADMIN_ID, message)
         # Check expired users and notify admin to take necessary action
         cursor.execute(
-            "SELECT tg_user_id, tg_username, username FROM users WHERE expiry_time<=? AND is_expired=false",
+            "SELECT telegram_id, linux_username FROM rentals WHERE end_time<=? AND is_expired=false",
             (now,),
         )
         expired_users = cursor.fetchall()
 
-        for tg_user_id, tg_username, username in expired_users:
+        for tg_user_id, username in expired_users:
             cursor.execute(
-                "UPDATE users SET is_expired=true WHERE username=?", (username,)
+                "UPDATE rentals SET is_expired=true WHERE linux_username=?", (username,)
             )
             conn.commit()
 
             message = f"❌ Your plan for the user: `{username}` has been expired."
             message += "\n\nThanks for using our service. 🙏"
             message += "\nFeel free to contact the admin for any queries. 📞"
+
+            new_password = await change_password(username)
 
             # Send the message to the user in DM
             await client.send_message(
@@ -1209,6 +1283,10 @@ async def notify_expiry():
                     [Button.inline("Delete User", data=f"delete_user {username}")],
                 ],
             )
+            await client.send_message(
+                ADMIN_ID,
+                f"🔑 New password for user `{username}`: `{new_password}`",
+            )
 
         await asyncio.sleep(60)  # Check every minute
 
@@ -1220,7 +1298,10 @@ async def handle_cancel(event):
     prev_msg = (
         f"⚠️ Plan for user `{username}` has expired. Please take necessary action."
     )
-    cursor.execute("UPDATE users SET is_expired=true WHERE username=?", (username,))
+    cursor.execute(
+        "UPDATE rentals SET is_expired=true WHERE (linux_username=? AND is_expired=false)",
+        (username,),
+    )
     conn.commit()
 
     await event.edit(prev_msg + "\n\n" + "🚫 Action canceled.")
@@ -1236,9 +1317,11 @@ async def handle_delete_user(event):
 async def handle_clean_db(event):
     username = event.data.decode().split()[1]
     # cursor.execute("DELETE FROM users WHERE username=?", (username,))
-    cursor.execute("UPDATE users SET is_active=false WHERE username=?", (username,))
+    cursor.execute(
+        "UPDATE rentals SET is_active=false WHERE linux_username=?", (username,)
+    )
     conn.commit()
-    cursor.execute("SELECT is_expired FROM users WHERE username=?", (username,))
+    cursor.execute("SELECT is_expired FROM rentals WHERE linux_username=?", (username,))
     is_expired = cursor.fetchone()[0]
     status = "Expired" if is_expired else "Active"
     await event.edit(
@@ -1258,7 +1341,7 @@ async def handle_tglink(event):
 
     # Update the user's Telegram ID in the database
     cursor.execute(
-        "UPDATE users SET tg_user_id=?, tg_first_name=?, tg_last_name=? WHERE username=?",
+        "UPDATE telegram_users SET tg_user_id=?, tg_first_name=?, tg_last_name=? WHERE username=?",
         (user_id, user_first_name, user_last_name, username),
     )
 
