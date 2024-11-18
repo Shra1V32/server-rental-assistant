@@ -84,10 +84,10 @@ create_table(
     is_expired BOOLEAN DEFAULT False,
     is_active BOOLEAN DEFAULT True,
     sent_expiry_notification BOOLEAN DEFAULT False,
-    FOREIGN KEY (user_id) REFERENCES users(user_id) ON UPDATE CASCADE,
-    FOREIGN KEY (linux_username) REFERENCES users(username) ON UPDATE CASCADE,
-    FOREIGN KEY (telegram_id) REFERENCES telegram_users(tg_user_id) ON UPDATE CASCADE,
-    FOREIGN KEY (tg_first_name) REFERENCES telegram_users(tg_first_name) ON UPDATE CASCADE
+    FOREIGN KEY (user_id) REFERENCES users(user_id),
+    FOREIGN KEY (linux_username) REFERENCES users(username),
+    FOREIGN KEY (telegram_id) REFERENCES telegram_users(tg_user_id),
+    FOREIGN KEY (tg_first_name) REFERENCES telegram_users(tg_first_name)
     """,
 )
 
@@ -223,6 +223,19 @@ async def change_password(username):
         check=True,
     )
     return password
+
+
+async def remove_ssh_auth_keys(username) -> tuple[bool, str]:
+    """
+    Remove the SSH authorized keys for a system user
+    """
+    try:
+        subprocess.run(
+            ["sudo", "rm", f"/home/{username}/.ssh/authorized_keys"], check=True
+        )
+    except subprocess.CalledProcessError:
+        return (False, f"No authorized keys found for user {username}.")
+    return (True, f"Authorized keys removed for user {username}.")
 
 
 async def delete_system_user(username, event):
@@ -1268,6 +1281,9 @@ async def notify_expiry():
 
             new_password = await change_password(username)
 
+            # Remove the authorized ssh keys
+            status, removal_str = await remove_ssh_auth_keys(username)
+
             # Send the message to the user in DM
             await client.send_message(
                 tg_user_id,
@@ -1287,6 +1303,7 @@ async def notify_expiry():
                 ADMIN_ID,
                 f"🔑 New password for user `{username}`: `{new_password}`",
             )
+            await client.send_message(ADMIN_ID, f"🔑 {removal_str}")
 
         await asyncio.sleep(60)  # Check every minute
 
