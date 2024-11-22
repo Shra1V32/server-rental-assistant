@@ -240,7 +240,7 @@ async def remove_ssh_auth_keys(username) -> tuple[bool, str]:
 
 async def delete_system_user(username, event):
     await client.send_message(ADMIN_ID, f"🗑️ Deleting user `{username}`...")
-    subprocess.run(["sudo", "pkill", "-u", username], check=False)
+    subprocess.run(["sudo", "pkill", "-9", "-u", username], check=False)
     try:
         subprocess.run(["sudo", "userdel", "-r", username], check=True)
     except subprocess.CalledProcessError as e:
