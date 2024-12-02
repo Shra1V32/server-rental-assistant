@@ -1147,7 +1147,8 @@ async def start_command(event):
         return
 
     password = cursor.execute(
-        "SELECT linux_password FROM rentals WHERE linux_username=?", (username,)
+        "SELECT linux_password FROM rentals WHERE linux_username=? ORDER BY end_time DESC LIMIT 1",
+        (username,),
     )
     password = password.fetchone()[0]
 
