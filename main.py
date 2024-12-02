@@ -1106,6 +1106,27 @@ async def list_connected_users(event):
     await send_connected_users(event)
 
 
+# /run command (For running a shell command)
+@client.on(events.NewMessage(pattern="/run"))
+@authorized_user
+async def run_command(event):
+
+    if len(event.message.text.split()) < 2:
+        await event.respond("❓ Usage: /run <command>")
+        return
+
+    command = event.message.text.split(" ", 1)[1]
+
+    try:
+        output = subprocess.run(
+            command, shell=True, check=True, capture_output=True, text=True
+        ).stdout
+    except subprocess.CalledProcessError as e:
+        output = e.stderr
+
+    await event.respond(f"```\n{output}\n```")
+
+
 async def send_connected_users(event):
     connected_users = await asyncio.create_subprocess_shell(
         "w", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
