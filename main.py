@@ -310,7 +310,7 @@ async def extend_plan_helper(
     # Send notification to the user
     if send_notification:
         cursor.execute(
-            "SELECT tg_user_id, tg_first_name, end_time FROM rentals WHERE linux_username=?",
+            "SELECT telegram_id, tg_first_name, end_time FROM rentals WHERE linux_username=?",
             (username,),
         )
         result = cursor.fetchone()
