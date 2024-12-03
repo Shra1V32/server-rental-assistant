@@ -181,7 +181,8 @@ def get_date_str(epoch: int):
     ist = pytz.timezone(TIME_ZONE)
     date = datetime.fromtimestamp(epoch, ist)
     day_suffix = get_day_suffix(date.day)
-    return date.strftime(f"%d{day_suffix} %B %Y, %I:%M %p IST")
+    day = date.day
+    return date.strftime(f"{day}{day_suffix} %B %Y, %I:%M %p IST")
 
 
 async def get_exchange_rate(from_currency, to_currency):
