@@ -1107,8 +1107,7 @@ async def link_user(event):
     username = event.message.text.split()[1]
 
     cursor.execute(
-        """SELECT telegram_id FROM telegram_users WHERE user_id = (
-            SELECT user_id FROM users WHERE linux_username = ?)""", (username,)
+        "SELECT linux_username FROM users WHERE linux_username=?", (username,)
     )
     result = cursor.fetchone()
 
@@ -1116,7 +1115,13 @@ async def link_user(event):
         await event.respond(f"❌ User `{username}` not found.")
         return
 
-    user_id = result[0]
+    cursor.execute(
+        """SELECT tg_user_id FROM telegram_users WHERE user_id = (
+            SELECT user_id FROM users WHERE linux_username = ?)""", (username,)
+    )
+    result = cursor.fetchone()
+
+    user_id = result[0] if result else None
     if user_id:
         await event.respond(
             f"❌ User `{username}` is already linked to a Telegram user."
