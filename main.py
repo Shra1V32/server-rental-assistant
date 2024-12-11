@@ -1261,9 +1261,15 @@ async def start_command(event):
 
         # Update users table as well
         cursor.execute(
-            """UPDATE rentals SET telegram_id = ?
-            WHERE user_id = (SELECT user_id FROM users WHERE linux_username = ?)""",
-            (tg_user_id, username),
+            """UPDATE rentals
+            SET telegram_id = (
+                SELECT tg_user_id
+                FROM telegram_users
+                WHERE user_id = (SELECT user_id FROM users WHERE linux_username = ?)
+            )
+            WHERE user_id = (SELECT user_id FROM users WHERE linux_username = ?);
+            """,
+            (username, username,),
         )
         conn.commit()
 
