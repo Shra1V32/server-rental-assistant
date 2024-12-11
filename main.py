@@ -263,6 +263,8 @@ async def delete_system_user(username, event):
         )""",
         (username,),
     )
+
+    cursor.execute("DELETE FROM users WHERE linux_username = ?", (username,))
     conn.commit()
     await event.respond(f"✅ User `{username}` deleted.")
 
