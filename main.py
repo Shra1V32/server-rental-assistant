@@ -1210,11 +1210,13 @@ async def start_command(event):
 
     # Does the uuid exist in the database?
     cursor.execute("SELECT linux_username FROM users WHERE uuid=?", (user_uuid,))
-    username = cursor.fetchone()[0]
-    print("Username:", username)
-    if not username:
+    user = cursor.fetchone()
+    if not user:
         await event.respond("❌ Invalid or expired link.")
         return
+    username = user[0]
+    print("Username:", username)
+
 
     password = cursor.execute(
         """SELECT u.linux_password
