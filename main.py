@@ -1080,7 +1080,7 @@ async def clear_user(event):
 
     username = event.message.text.split()[1]
     cursor.execute(
-        """UPDATE telegram_users SET tg_username=NULL, tg_user_id=NULL, tg_first_name=NULL, tg_last_name=NULL WHERE user_id = (
+        """DELETE FROM telegram_users WHERE user_id = (
             SELECT user_id FROM users WHERE linux_username = ? )""",
         (username,),
     )
