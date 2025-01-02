@@ -1,2 +1,7 @@
 telethon
 python-dotenv
+aiohttp
+pytz
+fpdf
+tabulate
+weasyprint
